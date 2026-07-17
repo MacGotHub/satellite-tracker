@@ -229,6 +229,12 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     apply time — the token lives in gitignored `cesium.auto.tfvars`
   - Custom CloudFront cache policy with 5-min default TTL — redeploys
     propagate without invalidations
+  - Satellite finder: type-ahead search (datalist autopopulated from the
+    positions poll) that flies the camera to the match — added after the
+    first real-use feedback ("couldn't find the ISS")
+  - Verified rendering in-browser by Derek (Cesium ion imagery + moving
+    satellites); ion token is machine-local — if it's ever lost, generate
+    a new one at cesium.com/ion, it's a 2-minute owner task
 
 ### In Progress / TODO
 - **Phase 3:** CesiumJS globe, S3 + CloudFront hosting
