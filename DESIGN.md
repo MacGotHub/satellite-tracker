@@ -2,7 +2,7 @@
 
 **Author:** Derek McWilliams
 **Last Updated:** July 2026
-**Status:** Phase 1 deployed and running (2026-07-10); Phases 2–5 not started
+**Status:** Phases 1–2 deployed and running (Phase 2 on 2026-07-16); Phases 3–5 not started
 
 ---
 

@@ -13,4 +13,10 @@ terraform {
 
 provider "aws" {
   region = "us-east-1"
+
+  # Applied to every resource (Phase 1's included — expect one-time
+  # in-place tag updates on them the first plan after this lands).
+  default_tags {
+    tags = local.common_tags
+  }
 }

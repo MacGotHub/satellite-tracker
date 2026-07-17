@@ -11,3 +11,9 @@ opentofu/build/
 opentofu/.terraform/
 *.tfstate
 *.tfstate.*
+
+# Skyfield layer build artifact (rebuilt by src/layers/skyfield/build.py)
+src/layers/skyfield/dist/
+
+# Saved plan files
+*.tfplan

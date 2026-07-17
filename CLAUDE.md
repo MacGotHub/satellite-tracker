@@ -64,17 +64,19 @@ satellite-tracker/
 │   ├── backend.tf             # S3 remote state (351668480009-opentofu-state, key sattrack/tle-pipeline) ✓
 │   ├── providers.tf           # AWS ~>5.0 + archive providers, us-east-1 ✓
 │   ├── main.tf                # Phase 1 as-built: DynamoDB, S3 archive, Lambda, IAM, Scheduler ✓
-│   ├── outputs.tf             # Table/bucket/function names — grows per phase ✓
-│   ├── lambda_api.tf          # Phase 2 — position API Lambda + Skyfield layer (TODO)
-│   ├── api_gateway.tf         # Phase 2 — HTTP API + routes (TODO)
+│   ├── locals.tf              # Naming prefix, common tags, API route map ✓
+│   ├── outputs.tf             # Table/bucket/function names, API endpoint — grows per phase ✓
+│   ├── lambda_api.tf          # Phase 2 — position API Lambda + Skyfield layer ✓
+│   ├── api_gateway.tf         # Phase 2 — HTTP API + routes ✓
 │   ├── frontend.tf            # Phase 3 — S3 bucket + CloudFront distribution (TODO)
 │   ├── alerts.tf              # Phase 4 — pass-check Lambda + SNS topic + SMS subscription (TODO)
 │   └── cicd_oidc.tf           # Phase 5 — GitHub OIDC provider ref + scoped deploy role (TODO)
 ├── src/                       # Lambda source (Python)
 │   ├── tle_fetch/             # Phase 1 handler ✓
-│   ├── api/                   # Phase 2 handler (TODO)
+│   ├── api/                   # Phase 2 handler — 4 routes ✓
+│   ├── shared/                # Pass/visibility logic shared by API + Phase 4 alerts ✓
 │   ├── alerts/                # Phase 4 handler (TODO)
-│   └── layers/skyfield/       # Layer build script/requirements (TODO)
+│   └── layers/skyfield/       # Layer build.py + requirements (zip output gitignored) ✓
 ├── tests/                     # pytest + moto unit tests (Phase 1 covered) ✓
 ├── frontend/                  # Phase 3 — CesiumJS static site (TODO)
 └── .github/
@@ -89,9 +91,11 @@ churning):
 - Phase 1 lives in a single `main.tf` rather than split
   `dynamodb.tf`/`lambda_tle_fetch.tf` files; split it only if/when a phase
   makes `main.tf` unwieldy.
-- No `variables.tf`/`locals.tf` yet — Phase 1 shipped without the
-  locals-as-brain pattern (no common tags, no watchlist local). Introduce
-  `locals.tf` when Phase 2 starts and fold Phase 1's naming into it.
+- `locals.tf` landed with Phase 2 (name prefix, common tags via provider
+  `default_tags`, API route map). Phase 1 resources keep their literal
+  `sattrack-*` names — renaming would destroy/recreate them. No
+  `variables.tf` yet; observer coords arrive as API query params in Phase 2
+  and become an SSM input in Phase 4.
 - Remote S3 state backend (shared `351668480009-opentofu-state` bucket +
   `opentofu-state-lock` DynamoDB lock table) — better than the implicit
   local-state assumption in the original plan; keep it.
@@ -199,8 +203,21 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     no-change `tofu plan`. Remote state key `sattrack/tle-pipeline`
     was kept as-is.
 
+- **Phase 2 — deployed 2026-07-16, live:**
+  - Lambda layer `sattrack-skyfield` (skyfield/numpy/sgp4/jplephem +
+    de421.bsp ephemeris at `/opt/data`), built by
+    `src/layers/skyfield/build.py` — rerun it if `dist/` is missing (zip is
+    gitignored)
+  - Lambda `sattrack-api` (read-only DynamoDB) + HTTP API
+    `https://acs8sbxe50.execute-api.us-east-1.amazonaws.com` with routes:
+    `GET /satellites`, `GET /positions`,
+    `GET /satellites/{id}/position`, `GET /satellites/{id}/passes?lat&lon`
+  - Shared pass/visibility logic in `src/shared/passes.py` (Phase 4 reuses)
+  - Observer coords are query params — never stored server-side in Phase 2
+  - Gotcha logged: numpy bools/floats leak into responses unless cast —
+    `json.dumps` rejects `numpy.bool_`; covered by an ephemeris-backed test
+
 ### In Progress / TODO
-- **Phase 2:** Skyfield Lambda layer, position/pass API Lambda, HTTP API routes
 - **Phase 3:** CesiumJS globe, S3 + CloudFront hosting
 - **Phase 4:** Pass-check Lambda, SNS topic + SMS subscription, dedupe flag
 - **Phase 5:** GitHub Actions workflows, OIDC provider + scoped deploy role

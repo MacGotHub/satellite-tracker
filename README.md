@@ -18,10 +18,12 @@ professional-grade cloud delivery.
 
 ## Status
 
-Phase 1 (TLE data pipeline) is deployed and running: a Lambda fetches TLEs
-from CelesTrak every 2 hours, archives the raw response to S3, and upserts
-parsed satellites into DynamoDB. Phases 2–5 (position API, 3D globe, SMS
-alerts, CI/CD) are not started. See CLAUDE.md for detailed status.
+Phases 1–2 are deployed and running. Phase 1: a Lambda fetches TLEs from
+CelesTrak every 2 hours, archives the raw response to S3, and upserts parsed
+satellites into DynamoDB. Phase 2: an HTTP API computes live positions and
+visible-pass predictions from those TLEs with Skyfield (as a Lambda layer).
+Phases 3–5 (3D globe, SMS alerts, CI/CD) are not started. See CLAUDE.md for
+detailed status.
 
 > Phase 1 was originally built on 2026-07-10 as `lab8-sattrack` inside the
 > sibling `aws-iac-lab` repo (a planning-doc fork caused by a PC crash) and
