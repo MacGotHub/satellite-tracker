@@ -1,0 +1,11 @@
+output "dynamodb_table_name" {
+  value = aws_dynamodb_table.sattrack.name
+}
+
+output "tle_archive_bucket" {
+  value = aws_s3_bucket.tle_archive.bucket
+}
+
+output "tle_fetcher_function_name" {
+  value = aws_lambda_function.tle_fetcher.function_name
+}

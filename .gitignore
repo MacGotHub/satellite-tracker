@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# OpenTofu Lambda build artifacts (zipped from src/ at plan/apply time)
+opentofu/build/
+
+# OpenTofu local plugin/module cache and any stray state
+opentofu/.terraform/
+*.tfstate
+*.tfstate.*
