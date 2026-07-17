@@ -28,6 +28,21 @@ html, body, #globe {
   color: #9fd8ff;
 }
 
+/* #hud is pointer-events:none so it never blocks globe dragging —
+   re-enable just for the search box. */
+#finder { margin-top: 8px; pointer-events: auto; }
+
+#sat-search {
+  width: 220px;
+  padding: 6px 10px;
+  border: 1px solid #2d4a66;
+  border-radius: 6px;
+  background: rgba(12, 20, 32, 0.88);
+  color: #e8f1fa;
+  font-size: 0.85rem;
+}
+#sat-search::placeholder { color: #8fa3b8; }
+
 #panel {
   position: absolute;
   top: 60px;

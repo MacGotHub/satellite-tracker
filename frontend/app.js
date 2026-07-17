@@ -83,11 +83,52 @@ async function poll() {
     statusEl.textContent = `${body.positions.length} satellites · updated ${new Date(
       body.time
     ).toLocaleTimeString()}`;
+    populateFinder();
     refreshPanel();
   } catch (err) {
     statusEl.textContent = `API unreachable (${err.message}) — retrying`;
   }
 }
+
+/* ---------- satellite finder ---------- */
+
+const searchInput = document.getElementById("sat-search");
+const searchOptions = document.getElementById("sat-options");
+let finderPopulated = false;
+
+// Options come from the same poll that feeds the globe, so the finder
+// always matches what's actually rendered (autopopulated, no extra fetch).
+function populateFinder() {
+  if (finderPopulated || latest.size === 0) return;
+  const names = [...latest.values()]
+    .map((sat) => sat.name)
+    .sort((a, b) => a.localeCompare(b));
+  searchOptions.replaceChildren(
+    ...names.map((name) => {
+      const option = document.createElement("option");
+      option.value = name;
+      return option;
+    })
+  );
+  finderPopulated = true;
+}
+
+searchInput.addEventListener("change", () => {
+  const query = searchInput.value.trim().toLowerCase();
+  if (!query) return;
+  const sats = [...latest.values()];
+  const sat =
+    sats.find((s) => s.name.toLowerCase() === query) ||
+    sats.find((s) => s.name.toLowerCase().includes(query));
+  if (!sat) return;
+
+  const entity = viewer.entities.getById(sat.id);
+  viewer.selectedEntity = entity;
+  viewer.flyTo(entity, {
+    offset: new Cesium.HeadingPitchRange(0, -Math.PI / 2, 2_500_000),
+  });
+  searchInput.blur();
+});
 
 /* ---------- selection panel + pass prediction ---------- */
 
