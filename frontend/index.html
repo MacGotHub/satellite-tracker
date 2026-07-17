@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SatTrack — live satellite globe</title>
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.130/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+  <link href="app.css" rel="stylesheet" />
+</head>
+<body>
+  <div id="globe"></div>
+
+  <header id="hud">
+    <h1>SatTrack</h1>
+    <span id="status">connecting…</span>
+  </header>
+
+  <aside id="panel" hidden>
+    <h2 id="panel-name"></h2>
+    <dl>
+      <div><dt>Latitude</dt><dd id="panel-lat"></dd></div>
+      <div><dt>Longitude</dt><dd id="panel-lon"></dd></div>
+      <div><dt>Altitude</dt><dd id="panel-alt"></dd></div>
+    </dl>
+    <section id="passes">
+      <h3>Upcoming passes</h3>
+      <p id="passes-hint">Uses your browser location (never stored) to
+        predict passes over the next 48 h.</p>
+      <button id="passes-load">Predict passes here</button>
+      <ol id="passes-list"></ol>
+    </section>
+  </aside>
+
+  <!-- config.js is generated at deploy time by OpenTofu (API URL + optional
+       Cesium ion token) — it is intentionally not in the repo. -->
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -17,3 +17,6 @@ src/layers/skyfield/dist/
 
 # Saved plan files
 *.tfplan
+
+# Deploy-time inputs (Cesium ion token) — never committed
+*.auto.tfvars

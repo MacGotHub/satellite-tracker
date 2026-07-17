@@ -14,3 +14,8 @@ output "api_endpoint" {
   value       = aws_apigatewayv2_api.sattrack.api_endpoint
   description = "Base URL for the position/pass API (Phase 2)"
 }
+
+output "globe_url" {
+  value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
+  description = "The 3D globe (Phase 3)"
+}
