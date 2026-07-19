@@ -1,4 +1,7 @@
 pytest
 boto3
 moto[s3,dynamodb]
+# IANA zone database for zoneinfo — absent on Windows (and not guaranteed on
+# the Lambda runtime, where the layer carries it); needed by src/alerts.
+tzdata
 skyfield
