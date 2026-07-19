@@ -41,7 +41,7 @@ DevSecOps job he wants next.
 | CesiumJS | 3D globe frontend (static site) |
 | GitHub Actions | CI/CD — `tofu plan`/`tofu apply` via OIDC role assumption |
 | AWS CLI | Ad-hoc verification and troubleshooting |
-| Git / GitHub | Version control (repo: MacGotHub/satellite-tracker — **not yet created**) |
+| Git / GitHub | Version control (repo: MacGotHub/satellite-tracker, created 2026-07-18) |
 
 **OpenTofu version:** Use whatever is current stable. OpenTofu is the IaC
 tool here (not CDK/CloudFormation) for consistency with `aws-iac-lab`.
@@ -237,12 +237,12 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     a new one at cesium.com/ion, it's a 2-minute owner task
 
 ### In Progress / TODO
-- **Phase 3:** CesiumJS globe, S3 + CloudFront hosting
 - **Phase 4:** Pass-check Lambda, SNS topic + SMS subscription, dedupe flag
 - **Phase 5:** GitHub Actions workflows, OIDC provider + scoped deploy role
 
 ### Owner Prerequisites (not build tasks)
-- Create GitHub repo `MacGotHub/satellite-tracker` (needed before Phase 5)
+- ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
+  history pushed (was local-only for two days)
 - ~~Free Cesium ion account + access token~~ — done 2026-07-16, lives in
   gitignored `opentofu/cesium.auto.tfvars`
 - Before Phase 5 starts: check whether account 351668480009 already has a
