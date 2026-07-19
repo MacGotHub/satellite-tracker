@@ -365,3 +365,78 @@ DynamoDB, scheduled/on-demand Lambda, HTTP API, S3 + CloudFront static
 hosting. The only per-use cost worth watching is **SNS SMS**, which bills per
 message — the Phase 4 dedupe flag is a correctness feature and a cost
 control. No always-on compute anywhere, by design.
+
+---
+
+## Roadmap — Post-Phase-5 Ideas (2026-07-18)
+
+Distilled from a brainstorming session (an external "SATTRACK-README"
+doc). That document was written without knowledge of the as-built system —
+where it conflicted with what's deployed (different repo, table keys,
+routes, schedules), the deployed design wins and the conflict is dropped,
+not relitigated. What survives, in rough priority order:
+
+### 1. SATCAT enrichment — "what am I looking at?"
+
+Every object should show owner, object type, and launch info — not just a
+cryptic name. Source: **CelesTrak SATCAT** (same provider as the TLEs,
+free, no auth, structured CSV/JSON).
+
+- New `satcat-sync` Lambda on a **weekly** schedule (SATCAT changes
+  slowly): download, parse, cache as JSON in S3. The Phase 1 `tle_fetch`
+  Lambda joins it on NORAD ID at ingest and writes enrichment attributes
+  (`owner`, `object_type`, `launch_date`, `launch_site`, `cospar_id`,
+  `rcs_size`) onto the existing TLE items — additive attributes only, no
+  key-schema change.
+- Human-readable `description`, built in priority order: (1) curated
+  `src/enrichment/notable_objects.json` (~50 hand-written entries for the
+  objects people actually click: ISS, Tiangong, Hubble, GPS, Starlink…);
+  (2) deterministic template from SATCAT fields ("Payload owned by China,
+  launched 2025-10-31 from Jiuquan").
+- **Data-quality rules (hard):** enrich only from authoritative structured
+  sources. No scraping third-party tracker sites (documented case of one
+  listing a Shenzhou capsule as a SpaceX payload), and no LLM-invented
+  descriptions from an object name alone.
+- Optional later layer: **GCAT** (planet4589.org, Jonathan McDowell) —
+  CC-BY-4.0, TSV downloads, actively maintained; adds owner/manufacturer
+  relations and object *phase* data (including "attached to" — see the
+  docked-vehicle rule below). Its mission descriptions are sparse, so it
+  supplements the curated table rather than replacing it. Attribution
+  required: "Data from J. McDowell, planet4589.org".
+
+### 2. Widen the tracked groups (globe, not alerts)
+
+Add CelesTrak groups beyond `stations`: `visual` (the ~100 brightest —
+these ARE alert candidates) first; `starlink`, `gnss`, `geo` later for the
+globe. Rules learned up front:
+
+- **GNSS/MEO and GEO are globe/data features, never alert candidates** —
+  too high and dim for naked-eye passes; GEO renders as a striking
+  near-stationary ring.
+- Deep-space objects (period > 225 min) trigger SGP4's SDP4 mode; the sgp4
+  library under Skyfield switches automatically — no code change.
+- Fetch etiquette holds: only pull groups actually in use; the existing
+  2-hour cadence is within CelesTrak guidance.
+- **Hard boundary:** no TLE exists for beyond-Earth-orbit objects (JWST,
+  lunar missions). That's a different data source and math model (JPL
+  Horizons/SPICE) — a separate future subsystem, not a config line.
+
+### 3. Docked-vehicle alert dedupe (becomes real when groups widen)
+
+Docked vehicles (Progress/Soyuz/Crew Dragon at the ISS, and NAUKA) carry
+near-identical TLEs to `25544`. Alerting per catalog row would fire
+multiple "ISS overhead" messages for one flyover. The deployed design
+already embodies the fix: `alert_watchlist` in `locals.tf` is an explicit
+**allow-list of one primary object per platform** — keep it that way; never
+switch the alerter to "everything in a group". GCAT phase data could later
+automate the docked-to relationship.
+
+### 4. Smaller candidates
+
+- `GET /overhead?lat&lon` route — "what's above me right now".
+- API Gateway throttling (e.g. burst 50 / rate 25) — the API is public;
+  pairs well with tightening CORS to the CloudFront domain.
+- TTL on TLE items (~7 days) so satellites dropped by CelesTrak age out of
+  the catalog instead of lingering with stale orbits (the table's TTL
+  attribute already exists for dedupe flags).
+- Space-Track.org as a future TLE source upgrade (auth required).
