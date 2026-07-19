@@ -236,8 +236,28 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     satellites); ion token is machine-local — if it's ever lost, generate
     a new one at cesium.com/ion, it's a 2-minute owner task
 
+- **Phase 4 — deployed 2026-07-18, live:**
+  - Lambda `sattrack-alerts` (reuses `shared/passes.py` + the Skyfield
+    layer, which now also carries `tzdata` for Eastern-time email copy),
+    two EventBridge schedules on one function selected by input payload:
+    `imminent` (10-min tick, ~15-min heads-up per visible pass) and
+    `digest` (5 PM ET daily, silent unless good passes are coming)
+  - Alert bar: pass classified visible AND peak >= 30 deg (locals.tf knob);
+    rise/set times still quoted against the 10-deg viewing horizon
+  - Dedupe: conditional-put flag items (`sk = ALERT#/DIGEST#<rise>`) in the
+    catalog table, claimed BEFORE publish (at-most-once by design); table
+    TTL on `expires_at` clears them a week after the pass
+  - Observer coords in SSM SecureString `/sattrack/observer` (read at cold
+    start, never in repo/state/env); email subscription added out-of-band
+    to topic `sattrack-alerts` — SMS joins the topic later, pending
+    toll-free origination-number registration (2020s US SNS SMS rule)
+  - Verified in-Lambda post-apply: both modes invoke clean; 0 messages was
+    cross-checked against the API — all next-72h passes genuinely
+    `visible: false` (daylight/shadow), so silence is correct behavior
+  - Unit tests: `tests/test_alerts.py` (10 tests; compute_passes stubbed,
+    SNS delivery asserted via a moto SQS subscription)
+
 ### In Progress / TODO
-- **Phase 4:** Pass-check Lambda, SNS topic + SMS subscription, dedupe flag
 - **Phase 5:** GitHub Actions workflows, OIDC provider + scoped deploy role
 
 ### Owner Prerequisites (not build tasks)
