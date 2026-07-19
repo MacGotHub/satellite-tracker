@@ -1,1 +1,4 @@
 skyfield==1.53
+# IANA tz database for zoneinfo (alert emails render Eastern time);
+# the AL2023-based Lambda runtime does not guarantee system tzdata.
+tzdata==2026.3

@@ -21,4 +21,14 @@ locals {
     "GET /positions",
     "GET /satellites/{id}/passes",
   ])
+
+  # Phase 4 — alerting. The knobs Derek is most likely to tune live here,
+  # not in alerts.tf or the handler.
+  alert_watchlist              = ["25544"] # NORAD IDs to alert on (ISS)
+  alert_min_peak_elevation_deg = 30        # texting bar; the API keeps its 10° horizon
+  alert_lead_minutes           = 20        # upper bound — with a 10-min tick, actual lead lands 10–20 min
+  alert_tick_minutes           = 10
+  digest_lookahead_hours       = 72
+  digest_schedule_cron         = "cron(0 17 * * ? *)" # 5 PM America/New_York (set on the schedule)
+  observer_ssm_parameter       = "/sattrack/observer" # SecureString "lat,lon", created out-of-band
 }

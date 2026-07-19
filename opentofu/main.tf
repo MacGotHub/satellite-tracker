@@ -26,6 +26,14 @@ resource "aws_dynamodb_table" "sattrack" {
     type = "S"
   }
 
+  # Phase 4 dedupe flags (sk = ALERT#/DIGEST#<rise time>) carry an epoch
+  # expires_at so DynamoDB clears them ~a week after the pass; TLE items
+  # never set the attribute and are untouched by TTL.
+  ttl {
+    attribute_name = "expires_at"
+    enabled        = true
+  }
+
   tags = {
     Name = "sattrack"
   }

@@ -19,3 +19,8 @@ output "globe_url" {
   value       = "https://${aws_cloudfront_distribution.frontend.domain_name}"
   description = "The 3D globe (Phase 3)"
 }
+
+output "alerts_topic_arn" {
+  value       = aws_sns_topic.alerts.arn
+  description = "Subscribe alert endpoints here (Phase 4) — see alerts.tf header for the command"
+}
