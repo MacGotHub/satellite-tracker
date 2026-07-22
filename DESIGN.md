@@ -2,7 +2,8 @@
 
 **Author:** Derek McWilliams
 **Last Updated:** July 2026
-**Status:** Phases 1–3 deployed and running (Phases 2–3 on 2026-07-16); Phases 4–5 not started
+**Status:** Phases 1–4 deployed and running (Phases 2–3 on 2026-07-16, Phase 4 on
+2026-07-18); Phase 5 not started
 
 ---
 
@@ -368,75 +369,183 @@ control. No always-on compute anywhere, by design.
 
 ---
 
-## Roadmap — Post-Phase-5 Ideas (2026-07-18)
+## Roadmap — Post-Phase-5 Ideas (updated 2026-07-21)
 
-Distilled from a brainstorming session (an external "SATTRACK-README"
-doc). That document was written without knowledge of the as-built system —
-where it conflicted with what's deployed (different repo, table keys,
-routes, schedules), the deployed design wins and the conflict is dropped,
-not relitigated. What survives, in rough priority order:
+Two source documents feed this roadmap:
 
-### 1. SATCAT enrichment — "what am I looking at?"
+- An external "SATTRACK-README" brainstorm doc (distilled 2026-07-18) —
+  written without knowledge of the as-built system; where it conflicted
+  with what's deployed (different repo, table keys, routes, schedules),
+  the deployed design won and the conflict was dropped, not relitigated.
+- `DESIGN-addition-observer-and-pass-geometry.md` (merged 2026-07-21) —
+  proposed against the deployed Phases 1–4 design (4 routes,
+  `pk=<norad_id>`/`sk="TLE"`, observer in SSM SecureString
+  `/sattrack/observer`, alert bar of visible + peak ≥ 30°). Sequenced
+  after Phase 5 so these ship through the new CI/CD pipeline as its first
+  real change.
 
-Every object should show owner, object type, and launch info — not just a
-cryptic name. Source: **CelesTrak SATCAT** (same provider as the TLEs,
-free, no auth, structured CSV/JSON).
+Ordered cheapest/easiest → hardest. Everything below is $0 marginal AWS
+cost unless noted — no item requires a table-schema change.
 
-- New `satcat-sync` Lambda on a **weekly** schedule (SATCAT changes
-  slowly): download, parse, cache as JSON in S3. The Phase 1 `tle_fetch`
-  Lambda joins it on NORAD ID at ingest and writes enrichment attributes
-  (`owner`, `object_type`, `launch_date`, `launch_site`, `cospar_id`,
-  `rcs_size`) onto the existing TLE items — additive attributes only, no
-  key-schema change.
-- Human-readable `description`, built in priority order: (1) curated
-  `src/enrichment/notable_objects.json` (~50 hand-written entries for the
-  objects people actually click: ISS, Tiangong, Hubble, GPS, Starlink…);
-  (2) deterministic template from SATCAT fields ("Payload owned by China,
-  launched 2025-10-31 from Jiuquan").
-- **Data-quality rules (hard):** enrich only from authoritative structured
-  sources. No scraping third-party tracker sites (documented case of one
-  listing a Shenzhou capsule as a SpaceX payload), and no LLM-invented
-  descriptions from an object name alone.
-- Optional later layer: **GCAT** (planet4589.org, Jonathan McDowell) —
-  CC-BY-4.0, TSV downloads, actively maintained; adds owner/manufacturer
-  relations and object *phase* data (including "attached to" — see the
-  docked-vehicle rule below). Its mission descriptions are sparse, so it
-  supplements the curated table rather than replacing it. Attribution
-  required: "Data from J. McDowell, planet4589.org".
+### Quick wins (trivial–easy, no new infra)
 
-### 2. Widen the tracked groups (globe, not alerts)
+1. **TTL on TLE items** (~7 days) — the table's TTL attribute already
+   exists for the Phase 4 dedupe flags; reuse it so satellites dropped by
+   CelesTrak age out of the catalog instead of lingering with stale
+   orbits.
+2. **API Gateway throttling** (e.g. burst 50 / rate 25) — the API is
+   public; pairs well with tightening CORS to the CloudFront domain.
+3. **Pass geometry — return the arc, not the apex.** Skyfield's
+   `find_events` already yields three events per pass (rise/culminate/set);
+   the current implementation keeps only culmination. Compute altitude and
+   azimuth at all three and return them, additive to the existing
+   response:
 
-Add CelesTrak groups beyond `stations`: `visual` (the ~100 brightest —
-these ARE alert candidates) first; `starlink`, `gnss`, `geo` later for the
-globe. Rules learned up front:
+   ```
+   {
+     "rise":      { "utc": "...", "az": 315.2, "compass": "NW" },
+     "peak":      { "utc": "...", "az":  22.4, "compass": "NNE", "alt": 36.1 },
+     "set":       { "utc": "...", "az":  91.7, "compass": "E"  },
+     "duration_s": 412,
+     "visibility": "visible",
+     "reason": null
+   }
+   ```
 
-- **GNSS/MEO and GEO are globe/data features, never alert candidates** —
-  too high and dim for naked-eye passes; GEO renders as a striking
-  near-stationary ring.
-- Deep-space objects (period > 225 min) trigger SGP4's SDP4 mode; the sgp4
-  library under Skyfield switches automatically — no code change.
-- Fetch etiquette holds: only pull groups actually in use; the existing
-  2-hour cadence is within CelesTrak guidance.
-- **Hard boundary:** no TLE exists for beyond-Earth-orbit objects (JWST,
-  lunar missions). That's a different data source and math model (JPL
-  Horizons/SPICE) — a separate future subsystem, not a config line.
+   `compass` is a derived 16-point label from azimuth, computed
+   server-side so the frontend and any future alert text agree on one
+   rendering. `duration_s` matters more than it looks — it's the
+   difference between "glance up" and "there's time to get outside."
+   Purely derived from TLEs already in DynamoDB.
+4. **Extend the pass search window from 48h to 10–14 days.** ISS-class
+   visible passes arrive in clusters separated by weeks, so a short window
+   legitimately returns zero most of the time. Propagating one satellite
+   over two weeks is milliseconds — cost is negligible.
+5. **Observer location as a query parameter** —
+   `GET /satellites/{id}/passes?lat=&lon=&elev=`, falling back to the SSM
+   observer when omitted. Keeps the existing alerting path and any current
+   callers working untouched. **Privacy decision:** round coordinates to 2
+   decimal places (~1 km) before they enter the query string — more than
+   sufficient for pass prediction, and it materially reduces what lands in
+   CloudFront/API Gateway access logs. Document this reasoning inline;
+   it's the system's answer to "how did you handle location PII?"
+6. **UTC-only API, browser-side localization.** The API returns UTC
+   ISO-8601 exclusively; the browser localizes via `Intl.DateTimeFormat`.
+   The Lambda never guesses a timezone. The 5 PM ET digest schedule itself
+   stays ET — that's owner-specific, not user-facing.
+7. **Frontend observer input, easy half** — browser Geolocation API (one
+   permission prompt) and manual lat/lon entry. Persist the selection in
+   `localStorage`; display the active observer so users know what they're
+   looking at.
 
-### 3. Docked-vehicle alert dedupe (becomes real when groups widen)
+### Medium (real new logic, one new component, or infra widening)
 
-Docked vehicles (Progress/Soyuz/Crew Dragon at the ISS, and NAUKA) carry
-near-identical TLEs to `25544`. Alerting per catalog row would fire
-multiple "ISS overhead" messages for one flyover. The deployed design
-already embodies the fix: `alert_watchlist` in `locals.tf` is an explicit
-**allow-list of one primary object per platform** — keep it that way; never
-switch the alerter to "everything in a group". GCAT phase data could later
-automate the docked-to relationship.
+8. **Visibility — classify, don't filter.** Return every pass in the
+   window with an explicit verdict instead of silently dropping
+   non-visible ones: `visible` (satellite sunlit, observer sun altitude
+   below the twilight threshold, peak ≥ threshold), `daylight` (observer's
+   sky too bright), `eclipsed` (satellite in Earth's shadow), `too_low`
+   (geometry fine, peak below threshold). This replaces the current
+   boolean "is it night" check with the actual sun altitude at the
+   observer (civil/nautical/astronomical twilight thresholds) — above
+   ~50°N in summer the sun never drops far enough for true darkness, and a
+   naive night flag fails in one direction or the other. Correct
+   thresholds behave properly from Miami to Yellowknife. Frontend defaults
+   to visible-only with a "show all passes" toggle — the verdict makes the
+   feature read as *explaining the sky* rather than returning nothing.
+9. **"Next visible pass" hero field** at the top of the panel, once #8
+   lands — this is the question users are actually asking. Handle the
+   honest empty case explicitly: no visible passes in the next N days,
+   with a one-line explanation that visibility comes in clusters.
+10. **Sky-arc UI component.** Render each pass as a small chart: azimuth
+    along the horizon axis (compass labels), elevation on the vertical
+    axis, an arc from rise through peak to set with times marked. Replaces
+    reading three numbers with a single glance. Worth surfacing alongside
+    it: an elevation reference (a fist at arm's length ≈ 10°, so 36° ≈ 3.5
+    fists up) and direction of travel — users scan a path, not a point.
+11. **Click-to-drop observer pin on the Cesium globe** — natural in
+    Cesium, and the strongest demo moment of the observer-location work.
+    Third of the four frontend input paths (after geolocation and manual
+    entry, before city search).
+12. **Inclination-limit display.** An observer poleward of a satellite's
+    inclination never gets a high pass (ISS at 51.6°, Tiangong at ~41.5°).
+    No filtering change needed — showing compass bearing and peak
+    elevation (already true once #3 lands) makes a permanently-low pass
+    legible instead of looking like a bug.
+13. **Widen the tracked groups (globe, not alerts)** — add CelesTrak
+    `visual` group (~100 brightest; these ARE alert candidates) first;
+    `starlink`/`gnss`/`geo` later for the globe only. Rules learned up
+    front: GNSS/MEO and GEO are globe/data features, never alert
+    candidates (too high and dim for naked-eye passes; GEO renders as a
+    striking near-stationary ring); deep-space objects (period > 225 min)
+    trigger SGP4's SDP4 mode automatically — no code change; fetch
+    etiquette holds, only pull groups actually in use, the existing 2-hour
+    cadence stays within CelesTrak guidance. **Hard boundary:** no TLE
+    exists for beyond-Earth-orbit objects (JWST, lunar missions) — that's
+    a different data source and math model (JPL Horizons/SPICE), a
+    separate future subsystem, not a config line. **Cost note:** stop at
+    `visual` for a while — `starlink` alone is thousands of objects and is
+    the one item on this list that could actually move the DynamoDB
+    storage/read needle, unlike everything else here.
+14. **Docked-object handling**, both layers together once #13 lands.
+    Alert-side dedupe is already shipped — `alert_watchlist` in
+    `locals.tf` is an explicit allow-list of one primary object per
+    platform (Progress/Soyuz/Crew Dragon and NAUKA carry near-identical
+    TLEs to `25544`; alerting per catalog row would fire multiple "ISS
+    overhead" messages for one flyover). Keep it an allow-list; never
+    switch the alerter to "everything in a group." The frontend layer is
+    new: flag docked objects (e.g. a Tianzhou cargo vehicle attached to
+    Tiangong shares the station's orbit, and its apparent brightness is
+    the station's, not the cargo craft's) so two catalog entries tracing
+    the same arc doesn't read as a bug. GCAT phase data (see #16) could
+    later automate the docked-to relationship.
+15. **`GET /overhead?lat&lon` route** — "what's above me right now."
 
-### 4. Smaller candidates
+### Harder (external dependencies or multi-part builds)
 
-- `GET /overhead?lat&lon` route — "what's above me right now".
-- API Gateway throttling (e.g. burst 50 / rate 25) — the API is public;
-  pairs well with tightening CORS to the CloudFront domain.
-- TTL on TLE items (~7 days) so satellites dropped by CelesTrak age out of
-  the catalog instead of lingering with stale orbits (the table's TTL
-  attribute already exists for dedupe flags).
-- Space-Track.org as a future TLE source upgrade (auth required).
+16. **SATCAT enrichment — "what am I looking at?"** Every object should
+    show owner, object type, and launch info, not just a cryptic name.
+    Source: **CelesTrak SATCAT** (same provider as the TLEs, free, no
+    auth, structured CSV/JSON).
+
+    - New `satcat-sync` Lambda on a **weekly** schedule (SATCAT changes
+      slowly): download, parse, cache as JSON in S3. The Phase 1
+      `tle_fetch` Lambda joins it on NORAD ID at ingest and writes
+      enrichment attributes (`owner`, `object_type`, `launch_date`,
+      `launch_site`, `cospar_id`, `rcs_size`) onto the existing TLE items —
+      additive attributes only, no key-schema change.
+    - Human-readable `description`, built in priority order: (1) curated
+      `src/enrichment/notable_objects.json` (~50 hand-written entries for
+      the objects people actually click: ISS, Tiangong, Hubble, GPS,
+      Starlink…); (2) deterministic template from SATCAT fields ("Payload
+      owned by China, launched 2025-10-31 from Jiuquan").
+    - **Data-quality rules (hard):** enrich only from authoritative
+      structured sources. No scraping third-party tracker sites
+      (documented case of one listing a Shenzhou capsule as a SpaceX
+      payload), and no LLM-invented descriptions from an object name
+      alone.
+    - Optional later layer: **GCAT** (planet4589.org, Jonathan McDowell) —
+      CC-BY-4.0, TSV downloads, actively maintained; adds
+      owner/manufacturer relations and object *phase* data (including
+      "attached to," feeding #14's automation). Its mission descriptions
+      are sparse, so it supplements the curated table rather than
+      replacing it. Attribution required: "Data from J. McDowell,
+      planet4589.org".
+17. **City search geocoder** — last of the four frontend observer-input
+    paths, deliberately sequenced last because it needs a geocoder
+    dependency. **Cost/privacy flag:** unlike everything else on this
+    list, this hands a typed location string to a third-party service and
+    may carry real per-request cost depending on provider (Nominatim is
+    free but rate-limited; Google/Mapbox-class geocoders charge). Decide
+    the provider deliberately when this item comes up, not by default.
+18. **Space-Track.org as a future TLE source upgrade** — requires auth (a
+    new secret to manage) and carries migration risk to an already-working
+    pipeline; evaluate only if CelesTrak stops being sufficient.
+
+### Out of scope — deliberate
+
+**Alerts stay single-observer.** Multi-user alerting means accounts,
+stored locations, per-user SNS subscriptions, and PII custody (PIPEDA/GDPR
+exposure for non-US users). That's a Cognito-shaped project with a real
+compliance surface, not a feature increment. The *site* serves anyone; the
+*alerts* remain Derek's.
