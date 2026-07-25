@@ -31,4 +31,9 @@ locals {
   digest_lookahead_hours       = 72
   digest_schedule_cron         = "cron(0 17 * * ? *)" # 5 PM America/New_York (set on the schedule)
   observer_ssm_parameter       = "/sattrack/observer" # SecureString "lat,lon", created out-of-band
+
+  # Phase 5 — the only repo the GitHub OIDC trust policies will ever accept
+  # a token from. Single source of truth so plan/apply role definitions
+  # never hardcode it twice.
+  github_repo = "MacGotHub/satellite-tracker"
 }
