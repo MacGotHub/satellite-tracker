@@ -1,0 +1,74 @@
+name: Plan
+
+# Only run when a PR actually touches something that affects the deploy —
+# no point spinning up a runner for a README typo fix.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "opentofu/**"
+      - "src/**"
+      - "frontend/**"
+      - ".github/workflows/plan.yml"
+
+# id-token: write is the OIDC-specific one — it's what lets this job request
+# a signed token from GitHub's OIDC provider at all. Everything else stays
+# at the default (no write access to repo contents, issues, etc.).
+permissions:
+  id-token: write
+  contents: read
+
+# A second push to the same PR cancels the still-running plan from the
+# first push — no point finishing a plan against code that's already stale.
+concurrency:
+  group: plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: src/layers/skyfield/requirements.txt
+
+      # Rebuilds the Skyfield layer zip that opentofu/lambda_api.tf expects
+      # at src/layers/skyfield/dist/skyfield-layer.zip. Locally this is a
+      # manual step Derek runs before `tofu plan`; in CI it has to happen
+      # every run since dist/ is gitignored and the runner starts clean.
+      - name: Build Skyfield layer
+        run: python src/layers/skyfield/build.py
+
+      # Exchanges GitHub's OIDC token for temporary AWS credentials by
+      # assuming sattrack-gha-plan — read-only, repo-scoped. No AWS keys
+      # anywhere in this repo's secrets.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::351668480009:role/sattrack-gha-plan
+          aws-region: us-east-1
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: latest
+
+      - name: tofu init
+        working-directory: opentofu
+        run: tofu init
+
+      # Writes the human-readable plan straight into the job summary tab
+      # (visible on the PR's checks) instead of posting a PR comment — one
+      # less permission (no pull-requests: write) for a first pass.
+      - name: tofu plan
+        working-directory: opentofu
+        run: |
+          tofu plan -no-color -input=false | tee plan.txt
+          {
+            echo '## tofu plan'
+            echo '```'
+            cat plan.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

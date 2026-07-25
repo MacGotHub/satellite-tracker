@@ -1,0 +1,64 @@
+name: Apply
+
+# Fires after a merge lands on main — this is the only trigger that can
+# produce the OIDC sub claim sattrack-gha-apply's trust policy requires
+# (repo:MacGotHub/satellite-tracker:ref:refs/heads/main).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "opentofu/**"
+      - "src/**"
+      - "frontend/**"
+      - ".github/workflows/apply.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+# Applies never overlap or get cancelled mid-flight — queue instead, so two
+# rapid merges to main can't race each other against the same state file.
+concurrency:
+  group: sattrack-apply
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: src/layers/skyfield/requirements.txt
+
+      - name: Build Skyfield layer
+        run: python src/layers/skyfield/build.py
+
+      # Assumes sattrack-gha-apply — the one role with write permissions,
+      # only reachable because this run's OIDC token proves ref = main.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::351668480009:role/sattrack-gha-apply
+          aws-region: us-east-1
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: latest
+
+      - name: tofu init
+        working-directory: opentofu
+        run: tofu init
+
+      - name: tofu apply
+        working-directory: opentofu
+        run: |
+          tofu apply -no-color -input=false -auto-approve | tee apply.txt
+          {
+            echo '## tofu apply'
+            echo '```'
+            cat apply.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
