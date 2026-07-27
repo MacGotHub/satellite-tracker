@@ -33,8 +33,8 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
 
 # Assumed by the PR-triggered plan workflow. Repo-scoped but NOT
 # branch-scoped — StringLike with a wildcard suffix so it matches both
-# `repo:.../pull_request` and `repo:.../ref:refs/heads/<any-branch>`. Safe
-# to be this loose only because this role is read-only below.
+# `...:pull_request` and `...:ref:refs/heads/<any-branch>`. Safe to be
+# this loose only because this role is read-only below.
 resource "aws_iam_role" "gha_plan" {
   name = "${local.name_prefix}-gha-plan"
 
@@ -49,17 +49,19 @@ resource "aws_iam_role" "gha_plan" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${local.github_repo}:*"
+          "token.actions.githubusercontent.com:sub" = "${local.github_oidc_sub_prefix}:*"
         }
       }
     }]
   })
 }
 
-# Assumed by the push-to-main apply workflow only. StringEquals, not
-# StringLike — pinned to exactly one ref. This is the trust-policy line
-# DESIGN.md calls out: a wildcard `sub` here would let a PR from a fork
-# assume a role that can change live infrastructure.
+# Assumed by the push-to-main apply workflow only. Pinned to exactly one
+# ref via StringLike (no wildcard is needed in the ref segment itself, but
+# StringLike vs. StringEquals doesn't matter here — the whole suffix is
+# fixed). This is the trust-policy line DESIGN.md calls out: a wildcard
+# `sub` here would let a PR from a fork assume a role that can change
+# live infrastructure.
 resource "aws_iam_role" "gha_apply" {
   name = "${local.name_prefix}-gha-apply"
 
@@ -72,7 +74,7 @@ resource "aws_iam_role" "gha_apply" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "repo:${local.github_repo}:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub" = "${local.github_oidc_sub_prefix}:ref:refs/heads/main"
         }
       }
     }]

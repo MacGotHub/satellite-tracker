@@ -32,8 +32,12 @@ locals {
   digest_schedule_cron         = "cron(0 17 * * ? *)" # 5 PM America/New_York (set on the schedule)
   observer_ssm_parameter       = "/sattrack/observer" # SecureString "lat,lon", created out-of-band
 
-  # Phase 5 — the only repo the GitHub OIDC trust policies will ever accept
-  # a token from. Single source of truth so plan/apply role definitions
-  # never hardcode it twice.
-  github_repo = "MacGotHub/satellite-tracker"
+  # Phase 5 — GitHub OIDC trust policy scoping. GitHub's token `sub` claim
+  # for this repo comes back as `repo:MacGotHub@188585672/satellite-tracker@1305326446:...`
+  # — the newer immutable-ID format (owner/repo name suffixed with their
+  # numeric IDs), confirmed by temporarily logging a decoded token from
+  # the plan workflow. Matching on the numeric IDs instead of the plain
+  # name is strictly tighter: a rename or a delete-and-recreate under the
+  # same name can't produce a token that matches an old policy.
+  github_oidc_sub_prefix = "repo:MacGotHub@188585672/satellite-tracker@1305326446"
 }
