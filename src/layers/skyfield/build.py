@@ -58,8 +58,33 @@ def main() -> None:
     zip_path = DIST / "skyfield-layer.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(work.rglob("*")):
-            if path.is_file() and "__pycache__" not in path.parts:
-                zf.write(path, path.relative_to(work))
+            rel = path.relative_to(work)
+            # site/bin holds pip-generated console-script launchers (f2py,
+            # numpy-config, ...) — Lambda never invokes them, only `import`
+            # matters, and on Windows pip embeds this run's ephemeral
+            # tempfile.mkdtemp() path into the launcher stub, which made the
+            # zip (and thus the layer's hash) different on every build.
+            # RECORD (dist-info) lists a hash for every installed file,
+            # bin/ included, so it still varied even after excluding bin/
+            # itself — also unread at Lambda runtime, also excluded.
+            if (
+                path.is_file()
+                and "__pycache__" not in path.parts
+                and rel.parts[:2] != ("python", "bin")
+                and rel.name != "RECORD"
+            ):
+                # ZipInfo built manually with a fixed date_time/external_attr
+                # instead of zf.write(path, ...): that copies the file's real
+                # mtime, which is "whenever pip just installed it" — every
+                # build gets a different timestamp and thus a different zip
+                # hash even when the installed content is byte-identical,
+                # which meant this layer replaced itself (and rippled into
+                # both Lambda functions referencing it) on every single
+                # apply. Fixed inputs now produce a fixed zip.
+                info = zipfile.ZipInfo(str(path.relative_to(work)), date_time=(1980, 1, 1, 0, 0, 0))
+                info.external_attr = 0o644 << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                zf.writestr(info, path.read_bytes())
 
     digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()[:16]
     size_mb = zip_path.stat().st_size / 1024 / 1024
