@@ -177,6 +177,14 @@ resource "aws_iam_policy" "gha_read" {
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-*"
       },
       {
+        # This module manages its own CI policies (gha_read/gha_write) —
+        # they get refreshed on every plan same as any other resource here.
+        Sid      = "OwnPolicyRead"
+        Effect   = "Allow"
+        Action   = ["iam:GetPolicy", "iam:GetPolicyVersion"]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name_prefix}-gha-*"
+      },
+      {
         Sid      = "SnsRead"
         Effect   = "Allow"
         Action   = ["sns:GetTopicAttributes", "sns:ListTagsForResource", "sns:ListSubscriptionsByTopic"]
@@ -296,6 +304,15 @@ resource "aws_iam_policy" "gha_write" {
           "iam:TagRole", "iam:UntagRole"
         ]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-*"
+      },
+      {
+        Sid    = "OwnPolicyWrite"
+        Effect = "Allow"
+        Action = [
+          "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion",
+          "iam:DeletePolicy", "iam:TagPolicy", "iam:UntagPolicy"
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name_prefix}-gha-*"
       },
       {
         # PassRole is the classic IAM privilege-escalation vector — restrict
