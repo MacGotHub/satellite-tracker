@@ -135,7 +135,8 @@ resource "aws_iam_policy" "gha_read" {
           "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging",
           "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:GetBucketCors",
           "s3:GetBucketWebsite", "s3:GetBucketVersioning", "s3:GetAccelerateConfiguration",
-          "s3:GetBucketRequestPayment", "s3:ListBucket"
+          "s3:GetBucketRequestPayment", "s3:GetBucketLogging", "s3:GetLifecycleConfiguration",
+          "s3:GetReplicationConfiguration", "s3:GetBucketObjectLockConfiguration", "s3:ListBucket"
         ]
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
       },
