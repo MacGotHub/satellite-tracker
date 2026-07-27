@@ -51,9 +51,15 @@ jobs:
           role-to-assume: arn:aws:iam::351668480009:role/sattrack-gha-plan
           aws-region: us-east-1
 
+      # Pinned, not "latest" — a floating version let CI's tofu resolve a
+      # different core release than whatever's installed locally, which
+      # surfaced as a spurious full-statement policy diff (JSON-equivalence
+      # checking for the inline IAM policies differed slightly between
+      # versions). Bump this deliberately, alongside the local install,
+      # rather than let the two drift apart silently.
       - uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: latest
+          tofu_version: "1.11.5"
 
       - name: tofu init
         working-directory: opentofu
