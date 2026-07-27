@@ -134,7 +134,7 @@ resource "aws_iam_policy" "gha_read" {
         Action = [
           "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging",
           "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:GetBucketCors",
-          "s3:GetBucketWebsite", "s3:GetBucketVersioning", "s3:ListBucket"
+          "s3:GetBucketWebsite", "s3:GetBucketVersioning", "s3:GetAccelerateConfiguration", "s3:ListBucket"
         ]
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
       },
@@ -190,15 +190,22 @@ resource "aws_iam_policy" "gha_read" {
         ]
       },
       {
-        # CloudWatch Logs ARNs need the trailing :* (log-stream segment) —
-        # without it, DescribeLogGroups rejects the resource match entirely.
-        Sid    = "LogsRead"
-        Effect = "Allow"
-        Action = ["logs:DescribeLogGroups", "logs:ListTagsLogGroup"]
-        Resource = [
-          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*",
-          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*:*",
-        ]
+        Sid      = "LogsReadTags"
+        Effect   = "Allow"
+        Action   = "logs:ListTagsLogGroup"
+        Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*:*"
+      },
+      {
+        # DescribeLogGroups is a list operation across the whole
+        # region/account namespace, filtered client-side by name prefix —
+        # it doesn't support per-group resource scoping at all (confirmed:
+        # the AccessDenied error came back with an empty group-name field
+        # even with a correctly-formed prefix ARN). Resource "*" is the
+        # only option, same story as CloudFront below.
+        Sid      = "LogsDescribe"
+        Effect   = "Allow"
+        Action   = "logs:DescribeLogGroups"
+        Resource = "*"
       },
       {
         Sid      = "ApiGatewayRead"
