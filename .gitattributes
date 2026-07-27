@@ -1,0 +1,7 @@
+# Force LF on checkout for all text files, regardless of platform or a
+# developer's local core.autocrlf setting. Without this, Lambda zips built
+# by `archive_file`/`file()` reading straight off disk hash differently on
+# Windows (CRLF working tree) vs. CI's Linux runners (LF) — same source,
+# different deployed bytes. Binary files are unaffected (git's text=auto
+# still auto-detects and skips them).
+* text=auto eol=lf

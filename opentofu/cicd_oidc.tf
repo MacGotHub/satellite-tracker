@@ -33,8 +33,8 @@ resource "aws_iam_openid_connect_provider" "github_actions" {
 
 # Assumed by the PR-triggered plan workflow. Repo-scoped but NOT
 # branch-scoped — StringLike with a wildcard suffix so it matches both
-# `repo:.../pull_request` and `repo:.../ref:refs/heads/<any-branch>`. Safe
-# to be this loose only because this role is read-only below.
+# `...:pull_request` and `...:ref:refs/heads/<any-branch>`. Safe to be
+# this loose only because this role is read-only below.
 resource "aws_iam_role" "gha_plan" {
   name = "${local.name_prefix}-gha-plan"
 
@@ -49,17 +49,19 @@ resource "aws_iam_role" "gha_plan" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${local.github_repo}:*"
+          "token.actions.githubusercontent.com:sub" = "${local.github_oidc_sub_prefix}:*"
         }
       }
     }]
   })
 }
 
-# Assumed by the push-to-main apply workflow only. StringEquals, not
-# StringLike — pinned to exactly one ref. This is the trust-policy line
-# DESIGN.md calls out: a wildcard `sub` here would let a PR from a fork
-# assume a role that can change live infrastructure.
+# Assumed by the push-to-main apply workflow only. Pinned to exactly one
+# ref via StringLike (no wildcard is needed in the ref segment itself, but
+# StringLike vs. StringEquals doesn't matter here — the whole suffix is
+# fixed). This is the trust-policy line DESIGN.md calls out: a wildcard
+# `sub` here would let a PR from a fork assume a role that can change
+# live infrastructure.
 resource "aws_iam_role" "gha_apply" {
   name = "${local.name_prefix}-gha-apply"
 
@@ -72,7 +74,7 @@ resource "aws_iam_role" "gha_apply" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "repo:${local.github_repo}:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub" = "${local.github_oidc_sub_prefix}:ref:refs/heads/main"
         }
       }
     }]
@@ -123,7 +125,7 @@ resource "aws_iam_policy" "gha_read" {
       {
         Sid      = "DynamoDbRead"
         Effect   = "Allow"
-        Action   = ["dynamodb:DescribeTable", "dynamodb:DescribeTimeToLive", "dynamodb:ListTagsOfResource"]
+        Action   = ["dynamodb:DescribeTable", "dynamodb:DescribeTimeToLive", "dynamodb:DescribeContinuousBackups", "dynamodb:ListTagsOfResource"]
         Resource = aws_dynamodb_table.sattrack.arn
       },
       {
@@ -131,9 +133,20 @@ resource "aws_iam_policy" "gha_read" {
         Effect = "Allow"
         Action = [
           "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging",
-          "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:ListBucket"
+          "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:GetBucketCors",
+          "s3:GetBucketWebsite", "s3:GetBucketVersioning", "s3:GetAccelerateConfiguration",
+          "s3:GetBucketRequestPayment", "s3:GetBucketLogging", "s3:GetLifecycleConfiguration",
+          "s3:GetReplicationConfiguration", "s3:GetBucketObjectLockConfiguration", "s3:ListBucket"
         ]
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
+      },
+      {
+        # The AWS provider refreshes this resource's own state on every
+        # plan, same as anything else this module manages.
+        Sid      = "OidcProviderRead"
+        Effect   = "Allow"
+        Action   = "iam:GetOpenIDConnectProvider"
+        Resource = aws_iam_openid_connect_provider.github_actions.arn
       },
       {
         Sid      = "S3ObjectRead"
@@ -144,7 +157,7 @@ resource "aws_iam_policy" "gha_read" {
       {
         Sid    = "LambdaRead"
         Effect = "Allow"
-        Action = ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:ListVersionsByFunction", "lambda:GetPolicy", "lambda:ListTags"]
+        Action = ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:ListVersionsByFunction", "lambda:GetPolicy", "lambda:ListTags"]
         Resource = [
           aws_lambda_function.tle_fetcher.arn,
           aws_lambda_function.api.arn,
@@ -164,6 +177,14 @@ resource "aws_iam_policy" "gha_read" {
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-*"
       },
       {
+        # This module manages its own CI policies (gha_read/gha_write) —
+        # they get refreshed on every plan same as any other resource here.
+        Sid      = "OwnPolicyRead"
+        Effect   = "Allow"
+        Action   = ["iam:GetPolicy", "iam:GetPolicyVersion"]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name_prefix}-gha-*"
+      },
+      {
         Sid      = "SnsRead"
         Effect   = "Allow"
         Action   = ["sns:GetTopicAttributes", "sns:ListTagsForResource", "sns:ListSubscriptionsByTopic"]
@@ -179,10 +200,25 @@ resource "aws_iam_policy" "gha_read" {
         ]
       },
       {
-        Sid      = "LogsRead"
+        # The AWS provider calls the newer ListTagsForResource, not the
+        # deprecated ListTagsLogGroup — and unlike DescribeLogGroups above,
+        # this one DOES want the plain group ARN (no trailing :*).
+        Sid      = "LogsReadTags"
         Effect   = "Allow"
-        Action   = ["logs:DescribeLogGroups", "logs:ListTagsLogGroup"]
+        Action   = "logs:ListTagsForResource"
         Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*"
+      },
+      {
+        # DescribeLogGroups is a list operation across the whole
+        # region/account namespace, filtered client-side by name prefix —
+        # it doesn't support per-group resource scoping at all (confirmed:
+        # the AccessDenied error came back with an empty group-name field
+        # even with a correctly-formed prefix ARN). Resource "*" is the
+        # only option, same story as CloudFront below.
+        Sid      = "LogsDescribe"
+        Effect   = "Allow"
+        Action   = "logs:DescribeLogGroups"
+        Resource = "*"
       },
       {
         Sid      = "ApiGatewayRead"
@@ -270,6 +306,15 @@ resource "aws_iam_policy" "gha_write" {
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-*"
       },
       {
+        Sid    = "OwnPolicyWrite"
+        Effect = "Allow"
+        Action = [
+          "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion",
+          "iam:DeletePolicy", "iam:TagPolicy", "iam:UntagPolicy"
+        ]
+        Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name_prefix}-gha-*"
+      },
+      {
         # PassRole is the classic IAM privilege-escalation vector — restrict
         # it to exactly the AWS services that ever assume a sattrack-* role.
         Sid      = "PassRoleToOwnServices"
@@ -298,10 +343,13 @@ resource "aws_iam_policy" "gha_write" {
         ]
       },
       {
-        Sid      = "LogsWrite"
-        Effect   = "Allow"
-        Action   = ["logs:CreateLogGroup", "logs:PutRetentionPolicy", "logs:TagLogGroup"]
-        Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*"
+        Sid    = "LogsWrite"
+        Effect = "Allow"
+        Action = ["logs:CreateLogGroup", "logs:PutRetentionPolicy", "logs:TagResource"]
+        Resource = [
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*",
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*:*",
+        ]
       },
       {
         # apigatewayv2's IAM model is action-on-path, not action-on-name —
