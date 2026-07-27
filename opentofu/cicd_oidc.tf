@@ -259,6 +259,16 @@ resource "aws_iam_policy" "gha_write" {
     Version = "2012-10-17"
     Statement = [
       {
+        # Missed on the first pass: the shared read policy granted GetObject
+        # and lock-table access but never the actual state-write permission.
+        # Only the apply role gets this — plan must never be able to write
+        # state, only read + lock/unlock for its own refresh.
+        Sid      = "StateObjectWrite"
+        Effect   = "Allow"
+        Action   = "s3:PutObject"
+        Resource = "arn:aws:s3:::351668480009-opentofu-state/sattrack/tle-pipeline/*"
+      },
+      {
         Sid      = "DynamoDbWrite"
         Effect   = "Allow"
         Action   = ["dynamodb:UpdateTable", "dynamodb:UpdateTimeToLive", "dynamodb:TagResource", "dynamodb:UntagResource"]
