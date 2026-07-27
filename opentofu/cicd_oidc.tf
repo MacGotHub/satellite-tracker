@@ -125,7 +125,7 @@ resource "aws_iam_policy" "gha_read" {
       {
         Sid      = "DynamoDbRead"
         Effect   = "Allow"
-        Action   = ["dynamodb:DescribeTable", "dynamodb:DescribeTimeToLive", "dynamodb:ListTagsOfResource"]
+        Action   = ["dynamodb:DescribeTable", "dynamodb:DescribeTimeToLive", "dynamodb:DescribeContinuousBackups", "dynamodb:ListTagsOfResource"]
         Resource = aws_dynamodb_table.sattrack.arn
       },
       {
@@ -133,9 +133,17 @@ resource "aws_iam_policy" "gha_read" {
         Effect = "Allow"
         Action = [
           "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging",
-          "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:ListBucket"
+          "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:GetBucketCors", "s3:ListBucket"
         ]
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
+      },
+      {
+        # The AWS provider refreshes this resource's own state on every
+        # plan, same as anything else this module manages.
+        Sid      = "OidcProviderRead"
+        Effect   = "Allow"
+        Action   = "iam:GetOpenIDConnectProvider"
+        Resource = aws_iam_openid_connect_provider.github_actions.arn
       },
       {
         Sid      = "S3ObjectRead"

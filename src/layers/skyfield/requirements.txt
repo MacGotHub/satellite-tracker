@@ -2,3 +2,10 @@ skyfield==1.53
 # IANA tz database for zoneinfo (alert emails render Eastern time);
 # the AL2023-based Lambda runtime does not guarantee system tzdata.
 tzdata==2026.3
+# Skyfield's own deps, pinned too — otherwise pip resolves whatever's
+# newest at build time and every CI plan sees a spurious layer replacement
+# from a transitive-dependency bump nobody asked for.
+numpy==2.2.6
+sgp4==2.27
+jplephem==2.24
+certifi==2026.7.22
