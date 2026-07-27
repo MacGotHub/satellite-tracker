@@ -134,7 +134,7 @@ resource "aws_iam_policy" "gha_read" {
         Action = [
           "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging",
           "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:GetBucketCors",
-          "s3:GetBucketWebsite", "s3:ListBucket"
+          "s3:GetBucketWebsite", "s3:GetBucketVersioning", "s3:ListBucket"
         ]
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
       },
@@ -190,10 +190,15 @@ resource "aws_iam_policy" "gha_read" {
         ]
       },
       {
-        Sid      = "LogsRead"
-        Effect   = "Allow"
-        Action   = ["logs:DescribeLogGroups", "logs:ListTagsLogGroup"]
-        Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*"
+        # CloudWatch Logs ARNs need the trailing :* (log-stream segment) —
+        # without it, DescribeLogGroups rejects the resource match entirely.
+        Sid    = "LogsRead"
+        Effect = "Allow"
+        Action = ["logs:DescribeLogGroups", "logs:ListTagsLogGroup"]
+        Resource = [
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*",
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*:*",
+        ]
       },
       {
         Sid      = "ApiGatewayRead"
@@ -309,10 +314,13 @@ resource "aws_iam_policy" "gha_write" {
         ]
       },
       {
-        Sid      = "LogsWrite"
-        Effect   = "Allow"
-        Action   = ["logs:CreateLogGroup", "logs:PutRetentionPolicy", "logs:TagLogGroup"]
-        Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*"
+        Sid    = "LogsWrite"
+        Effect = "Allow"
+        Action = ["logs:CreateLogGroup", "logs:PutRetentionPolicy", "logs:TagLogGroup"]
+        Resource = [
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*",
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*:*",
+        ]
       },
       {
         # apigatewayv2's IAM model is action-on-path, not action-on-name —
