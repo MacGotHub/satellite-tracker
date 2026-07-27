@@ -43,6 +43,17 @@ jobs:
       - name: Build Skyfield layer
         run: python src/layers/skyfield/build.py
 
+      # TEMP debug step — decode the OIDC token's claims so the trust
+      # policy's sub/aud conditions can be checked against reality instead
+      # of assumption. Removed once the role assumption below succeeds.
+      - name: Debug OIDC token claims
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            console.log(JSON.stringify({ sub: payload.sub, aud: payload.aud, iss: payload.iss, repository: payload.repository }, null, 2));
+
       # Exchanges GitHub's OIDC token for temporary AWS credentials by
       # assuming sattrack-gha-plan — read-only, repo-scoped. No AWS keys
       # anywhere in this repo's secrets.
