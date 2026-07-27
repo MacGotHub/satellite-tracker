@@ -2,8 +2,9 @@
 
 **Author:** Derek McWilliams
 **Last Updated:** July 2026
-**Status:** Phases 1–4 deployed and running (Phases 2–3 on 2026-07-16, Phase 4 on
-2026-07-18); Phase 5 not started
+**Status:** Phases 1–5 deployed and running (Phases 2–3 on 2026-07-16, Phase 4 on
+2026-07-18, Phase 5 on 2026-07-27) — see CLAUDE.md Current Status for the
+as-built detail and gotchas from each
 
 ---
 

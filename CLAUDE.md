@@ -71,7 +71,7 @@ satellite-tracker/
 │   ├── variables.tf           # cesium_ion_token (supplied via gitignored *.auto.tfvars) ✓
 │   ├── frontend.tf            # Phase 3 — S3 + CloudFront (OAC) + generated config.js ✓
 │   ├── alerts.tf              # Phase 4 — pass-check Lambda + SNS topic + SMS subscription (TODO)
-│   └── cicd_oidc.tf           # Phase 5 — GitHub OIDC provider ref + scoped deploy role (TODO)
+│   └── cicd_oidc.tf           # Phase 5 — GitHub OIDC provider + scoped plan/apply roles ✓
 ├── src/                       # Lambda source (Python)
 │   ├── tle_fetch/             # Phase 1 handler ✓
 │   ├── api/                   # Phase 2 handler — 4 routes ✓
@@ -82,7 +82,7 @@ satellite-tracker/
 ├── frontend/                  # Phase 3 — CesiumJS globe (index.html, app.js, app.css) ✓
 │                              #   config.js is generated at deploy time, not in repo
 └── .github/
-    └── workflows/             # Phase 5 — plan/apply pipelines (TODO)
+    └── workflows/             # Phase 5 — plan/apply pipelines ✓
 ```
 
 Do not create TODO directories until their phase actually starts.
@@ -257,18 +257,64 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
   - Unit tests: `tests/test_alerts.py` (10 tests; compute_passes stubbed,
     SNS delivery asserted via a moto SQS subscription)
 
-### In Progress / TODO
-- **Phase 5:** GitHub Actions workflows, OIDC provider + scoped deploy role
+- **Phase 5 — deployed 2026-07-27, live:**
+  - `opentofu/cicd_oidc.tf`: GitHub OIDC provider (thumbprint fetched live
+    via `data.tls_certificate`, not hardcoded — GitHub rotated its cert in
+    2023 and broke everyone who pasted one) + two IAM roles instead of one:
+    `sattrack-gha-plan` (repo-scoped, any ref/PR, read-only) and
+    `sattrack-gha-apply` (repo **and** `main`-branch scoped, read-write) —
+    a PR from any branch can never reach write permissions
+  - Gotcha: GitHub's OIDC `sub` claim for this repo comes back as
+    `repo:MacGotHub@188585672/satellite-tracker@1305326446:...` — the
+    newer immutable-ID format, not a plain `owner/repo` string. Trust
+    policies match on the numeric IDs (`local.github_oidc_sub_prefix`),
+    which is actually tighter than a name match (survives a rename)
+  - `.github/workflows/plan.yml` (PR → read-only plan, output to job
+    summary) and `apply.yml` (push to main → `tofu apply -auto-approve`).
+    Both pin `tofu_version` and use `set -o pipefail` around
+    `tofu ... | tee` — without it, `tee`'s exit code masks a real
+    tofu failure and the step shows green
+  - `CESIUM_ION_TOKEN` GitHub secret feeds `TF_VAR_cesium_ion_token` — CI
+    has no access to the gitignored local `cesium.auto.tfvars`
+  - `.gitattributes` (`* text=auto eol=lf`) added — matters for
+    `frontend.tf`'s `aws_s3_object` uploads (raw `filemd5()` content
+    hashing, so CRLF/LF really would change what gets deployed), though
+    it turned out not to be the cause of the Lambda-layer churn below
+  - Gotcha (the big one): `src/layers/skyfield/build.py` produced a
+    *different zip hash on every single build*, regardless of platform —
+    not a permissions issue, a build-determinism one. Two causes, found
+    by diffing two builds byte-for-byte: (1) `zf.write()` copied each
+    file's real mtime, which is "whenever pip just installed it"; fixed
+    via a manually-built `ZipInfo` with a constant `date_time`. (2) pip's
+    `python/bin/` console-script launchers (`f2py`, `numpy-config`) embed
+    that run's ephemeral `tempfile.mkdtemp()` path, and numpy's
+    `RECORD` lists a hash for them too — neither is read at Lambda
+    runtime, both excluded. Verified with 3 consecutive local rebuilds
+    producing an identical sha256. CI-to-CI reruns now show genuine
+    "No changes"; a Windows-local build still differs from CI's Linux
+    build by a few hundred KB (real wheel-resolution difference, not a
+    determinism bug) — harmless, causes one reconciling replace if
+    Derek ever applies locally again, and CI is the primary apply path
+    from here anyway
+  - Read-only IAM policy scoping took ~10 iterations against real
+    `AccessDenied` errors from the AWS provider's own drift-detection
+    reads (S3 bucket sub-configs, `logs:DescribeLogGroups` has no
+    resource-level support at all, deprecated `ListTagsLogGroup` vs.
+    `ListTagsForResource`, etc.) — exactly DESIGN.md's predicted
+    "AccessDenied afternoon"
+  - First real `apply.yml` run succeeded on every actual AWS change but
+    failed to persist state (missing `s3:PutObject` on the state key —
+    only `GetObject` + lock-table access had been granted). Real infra
+    was briefly ahead of remote state; reconciled locally, permission
+    added, `tofu plan` confirmed clean before moving on
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
   history pushed (was local-only for two days)
 - ~~Free Cesium ion account + access token~~ — done 2026-07-16, lives in
   gitignored `opentofu/cesium.auto.tfvars`
-- Before Phase 5 starts: check whether account 351668480009 already has a
-  GitHub OIDC provider from a past lab —
-  `aws iam list-open-id-connect-providers` — don't create a duplicate.
-  This check happens when Phase 5 starts, not now.
+- ~~Check for an existing GitHub OIDC provider before Phase 5~~ — done
+  2026-07-27, account had none, created directly
 
 ### Known Dependencies
 - Phase 2 needs Phase 1's TLE data flowing before positions mean anything
