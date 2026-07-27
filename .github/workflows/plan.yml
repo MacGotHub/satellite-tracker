@@ -62,9 +62,14 @@ jobs:
       # Writes the human-readable plan straight into the job summary tab
       # (visible on the PR's checks) instead of posting a PR comment — one
       # less permission (no pull-requests: write) for a first pass.
+      # set -o pipefail: without it, `tofu plan | tee` reports tee's exit
+      # code (always 0), so a genuinely broken plan would still show this
+      # step — and the whole job — as green.
       - name: tofu plan
         working-directory: opentofu
+        shell: bash
         run: |
+          set -o pipefail
           tofu plan -no-color -input=false | tee plan.txt
           {
             echo '## tofu plan'

@@ -133,7 +133,8 @@ resource "aws_iam_policy" "gha_read" {
         Effect = "Allow"
         Action = [
           "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging",
-          "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:GetBucketCors", "s3:ListBucket"
+          "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:GetBucketCors",
+          "s3:GetBucketWebsite", "s3:ListBucket"
         ]
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
       },
@@ -154,7 +155,7 @@ resource "aws_iam_policy" "gha_read" {
       {
         Sid    = "LambdaRead"
         Effect = "Allow"
-        Action = ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:ListVersionsByFunction", "lambda:GetPolicy", "lambda:ListTags"]
+        Action = ["lambda:GetFunction", "lambda:GetFunctionConfiguration", "lambda:GetFunctionCodeSigningConfig", "lambda:ListVersionsByFunction", "lambda:GetPolicy", "lambda:ListTags"]
         Resource = [
           aws_lambda_function.tle_fetcher.arn,
           aws_lambda_function.api.arn,
