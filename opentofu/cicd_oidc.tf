@@ -134,7 +134,8 @@ resource "aws_iam_policy" "gha_read" {
         Action = [
           "s3:GetBucketPolicy", "s3:GetBucketPublicAccessBlock", "s3:GetBucketTagging",
           "s3:GetBucketAcl", "s3:GetEncryptionConfiguration", "s3:GetBucketCors",
-          "s3:GetBucketWebsite", "s3:GetBucketVersioning", "s3:GetAccelerateConfiguration", "s3:ListBucket"
+          "s3:GetBucketWebsite", "s3:GetBucketVersioning", "s3:GetAccelerateConfiguration",
+          "s3:GetBucketRequestPayment", "s3:ListBucket"
         ]
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
       },
@@ -190,10 +191,13 @@ resource "aws_iam_policy" "gha_read" {
         ]
       },
       {
+        # The AWS provider calls the newer ListTagsForResource, not the
+        # deprecated ListTagsLogGroup — and unlike DescribeLogGroups above,
+        # this one DOES want the plain group ARN (no trailing :*).
         Sid      = "LogsReadTags"
         Effect   = "Allow"
-        Action   = "logs:ListTagsLogGroup"
-        Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*:*"
+        Action   = "logs:ListTagsForResource"
+        Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*"
       },
       {
         # DescribeLogGroups is a list operation across the whole
@@ -323,7 +327,7 @@ resource "aws_iam_policy" "gha_write" {
       {
         Sid    = "LogsWrite"
         Effect = "Allow"
-        Action = ["logs:CreateLogGroup", "logs:PutRetentionPolicy", "logs:TagLogGroup"]
+        Action = ["logs:CreateLogGroup", "logs:PutRetentionPolicy", "logs:TagResource"]
         Resource = [
           "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*",
           "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*:*",
