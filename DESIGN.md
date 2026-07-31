@@ -590,7 +590,7 @@ control. No always-on compute anywhere, by design.
 
 ---
 
-## Roadmap — Post-Phase-5 Ideas (updated 2026-07-21)
+## Roadmap — Post-Phase-5 Ideas (updated 2026-07-31)
 
 Two source documents feed this roadmap:
 
@@ -604,9 +604,115 @@ Two source documents feed this roadmap:
   `/sattrack/observer`, alert bar of visible + peak ≥ 30°). Sequenced
   after Phase 5 so these ship through the new CI/CD pipeline as its first
   real change.
+- `DESIGN-addition-phase6-client-side-propagation.md` (merged 2026-07-31)
+  — an architectural shift, not an incremental feature, so it's called
+  out as its own subsection below rather than slotted into the numbered
+  cheapest→hardest list. Reviewed against the actual code (not just the
+  proposal) before merging: checked `alerts/handler.py` to confirm it
+  never calls the HTTP API (reads DynamoDB + `shared/passes.py` directly),
+  which is what let the route-retirement decision be concrete instead of
+  speculative.
 
 Ordered cheapest/easiest → hardest. Everything below is $0 marginal AWS
 cost unless noted — no item requires a table-schema change.
+
+### Phase 6 — client-side propagation (architectural shift, proposed)
+
+**The idea:** stop computing per-observer positions/passes in the API
+Lambda. TLEs are observer-independent — the same elements work for any
+viewer, anywhere — so the server's job shrinks to "distribute TLEs," and
+each browser runs SGP4 itself (via **satellite.js**) combined with its
+*own* location (Geolocation API or manual entry) to get positions,
+look-angles, and passes on-device. One shift, three payoffs:
+
+1. **Arbitrary observer locations for free** — travel (e.g. a dark-sky
+   trip to the NC mountains) or any other viewer just works, no SSM
+   rewrite or redeploy, since the observer never leaves the browser.
+   Bonus: the traveler's coordinates never land in CloudFront/API Gateway
+   access logs, and satellite.js can factor in observer elevation for a
+   correctness win exactly where mountain trips need it.
+2. **Starlink-scale (~8k objects) becomes a frontend concern, not a
+   backend one** — see the caching caveat below for what actually pays
+   for this.
+3. **Smoother motion** — local interpolation in an animation loop instead
+   of a poll-and-snap-to-position cycle.
+
+**Route fate — resolved by checking actual callers, not guessing:**
+`alerts/handler.py` never calls the HTTP API at all; it reads DynamoDB
+and calls `shared/passes.compute_passes` directly. So `GET /positions`,
+`GET /satellites/{id}/position`, and `GET /satellites/{id}/passes` exist
+*only* to serve the frontend today — once satellite.js takes over,
+nothing server-side consumes any of the three, and they're retired, not
+kept as a fallback. `GET /satellites` gets extended with `line1`/`line2`
+(and TLE epoch) to become the one payload the client needs. Bonus this
+surfaces: with position/pass math gone from `api/handler.py`, the API
+Lambda no longer needs the Skyfield layer at all — drops a 32 MB layer
+and its cold-start cost, and retires the "numpy bool leaks into
+`json.dumps`" bug class for that Lambda for good. Skyfield stays, scoped
+to the alerts Lambda only — `shared/passes.py` keeps exactly one caller.
+
+**Carve-out (deliberate): alerts stay server-side.** The SNS pass-alerter
+has no browser in the loop — it must compute passes on a schedule in the
+backend. Pass math ends up living in two places by design: Skyfield
+(Lambda) for SNS alerts against the fixed home observer, satellite.js
+(browser) for the interactive site against an arbitrary observer. This
+must stay a conscious choice, not drift into an accident.
+
+**Caveat: two SGP4 engines can differ slightly.** Skyfield and
+satellite.js implement the same model but are different codebases —
+expect ~a second of difference on pass times and small position deltas.
+The on-screen arc and the SNS alert text won't match to the millisecond;
+that's not a bug. If exact parity ever matters, pick one engine as
+authoritative for the displayed number.
+
+**Caveat: caching, not client-side compute, is what actually pays for
+Starlink scale.** `_scan_catalog()` in `api/handler.py` is still a
+`Scan`, and DynamoDB bills by items scanned, not items returned after
+filtering — serving ~8k items costs real read capacity regardless of
+where the position math runs. CloudFront caching the TLE payload (TTL
+~1–2h, matching Phase 1's fetch cadence — no point serving data fresher
+than the source refreshes) is what turns that Scan into a per-cache-miss
+cost instead of a per-viewer-per-poll one. This doesn't retire item 13's
+caution below: CelesTrak fetch etiquette and DynamoDB storage/scan size
+are governed by Phase 1's ingestion schedule and catalog item count, not
+by who consumes the result. Phase 6 makes the *frontend* side of
+Starlink-scale cheap; the *ingestion* side is item 13's decision to make
+deliberately, unchanged by this.
+
+**Interaction with the numbered roadmap below:** items 3, 5, 8, 9, and 15
+are written as API/Skyfield enhancements against a route Phase 6 retires
+(`/satellites/{id}/passes`) — under Phase 6 they'd be reimplemented
+against satellite.js output in the browser instead (or, for 15, possibly
+answered client-side from the already-fetched TLE catalog rather than a
+new route). Item 7 (Geolocation + manual entry) isn't superseded, it's
+just *where* Phase 6's own sequencing step 2 already plans to build it —
+same work, one less separate roadmap item to track once Phase 6 starts.
+Items 10, 11, 12 are frontend UI/rendering work that stays valid
+regardless of which engine produced the numbers. Not resolving each one
+here — flagging it so a future pass at any of 3/5/8/9/15 starts by asking
+"does Phase 6 change where this lives" instead of building the
+server-side version by default.
+
+**Suggested sequencing:**
+
+1. Add satellite.js to the frontend; render one already-tracked group
+   client-side from TLEs the API already serves. Verify parity against
+   the current server-computed positions.
+2. Wire in Geolocation + manual location entry; recompute look-angles
+   locally.
+3. Add a large group (Starlink) now that count is a client concern; tune
+   rendering.
+4. Slim/cache the TLE-serving endpoint (CloudFront) and confirm Lambda
+   invocation drop.
+5. Retire the three superseded routes and the Skyfield layer dependency
+   from `api/handler.py`.
+
+**Portfolio framing:** "Moved orbit propagation client-side (satellite.js)
+to support arbitrary observer locations and scale to ~10k objects on
+CloudFront-cached, observer-independent data instead of added backend
+compute, while retaining server-side Skyfield propagation for scheduled
+SNS alerts." Server-side vs. client-side compute, with an explicit
+rationale and an explicit carve-out.
 
 ### Quick wins (trivial–easy, no new infra)
 
@@ -637,7 +743,9 @@ cost unless noted — no item requires a table-schema change.
    server-side so the frontend and any future alert text agree on one
    rendering. `duration_s` matters more than it looks — it's the
    difference between "glance up" and "there's time to get outside."
-   Purely derived from TLEs already in DynamoDB.
+   Purely derived from TLEs already in DynamoDB. **If Phase 6 lands
+   first:** this becomes a satellite.js concern in the browser, not an
+   API response shape — see Phase 6's roadmap-interaction note above.
 4. **Extend the pass search window from 48h to 10–14 days.** ISS-class
    visible passes arrive in clusters separated by weeks, so a short window
    legitimately returns zero most of the time. Propagating one satellite
@@ -649,7 +757,10 @@ cost unless noted — no item requires a table-schema change.
    decimal places (~1 km) before they enter the query string — more than
    sufficient for pass prediction, and it materially reduces what lands in
    CloudFront/API Gateway access logs. Document this reasoning inline;
-   it's the system's answer to "how did you handle location PII?"
+   it's the system's answer to "how did you handle location PII?" **If
+   Phase 6 lands first:** this route retires outright — the observer
+   never leaves the browser, so there's no query param (or its privacy
+   rounding) to design at all.
 6. **UTC-only API, browser-side localization.** The API returns UTC
    ISO-8601 exclusively; the browser localizes via `Intl.DateTimeFormat`.
    The Lambda never guesses a timezone. The 5 PM ET digest schedule itself
@@ -674,10 +785,15 @@ cost unless noted — no item requires a table-schema change.
    thresholds behave properly from Miami to Yellowknife. Frontend defaults
    to visible-only with a "show all passes" toggle — the verdict makes the
    feature read as *explaining the sky* rather than returning nothing.
+   **If Phase 6 lands first:** this classification math (sun altitude,
+   twilight thresholds) needs a JS port to run against satellite.js
+   output — same logic, different runtime, not a Python change.
 9. **"Next visible pass" hero field** at the top of the panel, once #8
    lands — this is the question users are actually asking. Handle the
    honest empty case explicitly: no visible passes in the next N days,
-   with a one-line explanation that visibility comes in clusters.
+   with a one-line explanation that visibility comes in clusters. **If
+   Phase 6 lands first:** "once #8 lands" means the JS port above, not
+   the API version.
 10. **Sky-arc UI component.** Render each pass as a small chart: azimuth
     along the horizon axis (compass labels), elevation on the vertical
     axis, an arc from rise through peak to set with times marked. Replaces
@@ -720,7 +836,11 @@ cost unless noted — no item requires a table-schema change.
     the station's, not the cargo craft's) so two catalog entries tracing
     the same arc doesn't read as a bug. GCAT phase data (see #16) could
     later automate the docked-to relationship.
-15. **`GET /overhead?lat&lon` route** — "what's above me right now."
+15. **`GET /overhead?lat&lon` route** — "what's above me right now." **If
+    Phase 6 lands first:** likely answered client-side by filtering the
+    already-fetched TLE catalog against the browser's own location
+    instead of a new server route — re-evaluate whether this needs a
+    backend endpoint at all once satellite.js is in place.
 
 ### Harder (external dependencies or multi-part builds)
 
