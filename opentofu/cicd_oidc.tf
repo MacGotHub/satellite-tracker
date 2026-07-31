@@ -310,6 +310,17 @@ resource "time_sleep" "gha_read_bootstrap_propagation" {
     aws_iam_role_policy_attachment.gha_apply_read_bootstrap,
   ]
   create_duration = "10s"
+
+  # time_sleep only actually sleeps at its own creation — depends_on alone
+  # only orders the FIRST apply that attaches this policy, not later
+  # content changes to it (confirmed: adding a statement here later
+  # didn't re-trigger the wait, since the attachment itself hadn't
+  # changed). Tying triggers to the policy body forces this resource to
+  # be replaced (and wait again) every time gha_read_bootstrap's content
+  # changes, not just the first time it's attached.
+  triggers = {
+    policy = aws_iam_policy.gha_read_bootstrap.policy
+  }
 }
 
 # -----------------------------------------------
@@ -566,4 +577,11 @@ resource "aws_iam_role_policy_attachment" "gha_apply_write_bootstrap" {
 resource "time_sleep" "gha_write_bootstrap_propagation" {
   depends_on      = [aws_iam_role_policy_attachment.gha_apply_write_bootstrap]
   create_duration = "10s"
+
+  # See the matching comment on gha_read_bootstrap_propagation above —
+  # ties this wait to the policy body so it re-fires on content changes,
+  # not just the first-ever attachment.
+  triggers = {
+    policy = aws_iam_policy.gha_write_bootstrap.policy
+  }
 }

@@ -505,6 +505,21 @@ credentials — they are specifically CI-scoped-role problems, which is
 exactly why Phase 5 flagged this as the "AccessDenied afternoon" before
 a single line of Phase 5 code existed.
 
+**Gotcha (seventh apply failure — the sleep only sleeps once):** the
+`logs:CreateLogDelivery` fix from gotcha #6 still failed on its next
+run. `time_sleep`'s `create_duration` only elapses when the resource
+itself is *created* — `depends_on` an attachment resource only orders
+the wait relative to that attachment's first-ever creation, not any
+later change to the *policy's own content*. Since `gha_write_bootstrap`
+was updated in place (new `LogsDeliveryWrite` statement, same attachment,
+same ARN), nothing told the already-existing `time_sleep` to wait again.
+Fixed by adding a `triggers = { policy = aws_iam_policy.*.policy }` block
+to both bootstrap sleeps — changing either policy's body now forces that
+`time_sleep` to be replaced (and re-wait), not just reordered. Lesson:
+`depends_on` alone is a one-time bootstrap fix; a policy that keeps
+changing across an iterative debugging session needs its propagation
+gate tied to the policy's *content*, not just its existence.
+
 ---
 
 ## Build Order and Dependencies
