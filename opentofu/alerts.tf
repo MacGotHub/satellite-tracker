@@ -16,6 +16,10 @@
 resource "aws_sns_topic" "alerts" {
   name = "${local.name_prefix}-alerts"
 
+  # AWS-managed key (alias/aws/sns), not a customer CMK — same protection
+  # Checkov's KMS check wants, zero monthly key cost.
+  kms_master_key_id = "alias/aws/sns"
+
   tags = {
     Name = "${local.name_prefix}-alerts"
   }

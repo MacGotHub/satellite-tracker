@@ -1,0 +1,45 @@
+# Checkov config for the satellite-tracker OpenTofu code. Run from CI via
+# .github/workflows/plan.yml and apply.yml (bridgecrewio/checkov-action).
+#
+# Checks below recur identically across every Lambda / log group / S3
+# bucket in this repo, so they're accepted once here instead of duplicating
+# the same rationale as inline `checkov:skip` comments in three files.
+# Resource-specific exceptions (e.g. the frontend bucket's lifecycle skip,
+# the CloudFront distribution's TLS/WAF/logging skips) stay inline next to
+# the resource they apply to — see frontend.tf and api_gateway.tf.
+#
+# This is a $0-marginal-cost hobby project (see CLAUDE.md "Cost Posture" /
+# "What NOT to Do" — no always-on compute, no gold-plating). Every skip
+# below is either an enterprise control with a real monthly cost (customer
+# CMKs, WAF, VPC, cross-region replication, code signing) or a control that
+# doesn't fit this architecture (single-account personal project, no
+# compliance/audit mandate, no untrusted contributors).
+skip-check:
+  # Lambda hardening aimed at large multi-team/regulated environments —
+  # disproportionate for 3 hobby functions with one contributor:
+  - CKV_AWS_272 # code-signing (AWS Signer) — supply-chain control for untrusted contributors; N/A, solo repo
+  - CKV_AWS_116 # DLQ for async invocations — no current failure-handling need; revisit if silent alert-drop becomes a real problem
+  - CKV_AWS_115 # reserved concurrency — a cost/throttling knob, not a vulnerability, at this traffic level
+  - CKV_AWS_117 # Lambda-in-VPC — these functions only call AWS APIs + public HTTPS (CelesTrak); VPC adds a NAT gateway bill for zero benefit
+  - CKV_AWS_50 # X-Ray tracing — observability nice-to-have, not a security gap; candidate for the post-Phase-5 roadmap, not this gate
+
+  # KMS customer-managed keys ($1/mo each) vs. the AWS-managed keys this
+  # repo already uses for SNS/DynamoDB/S3 (aws_lambda_function env vars
+  # and CloudWatch Logs don't expose a no-cost AWS-managed-key path the
+  # way those three services do):
+  - CKV_AWS_173 # Lambda env var CMK — no secrets in any function's env vars (real secrets are SSM SecureString, see alerts.tf); default at-rest encryption already applies
+  - CKV_AWS_158 # CloudWatch Logs CMK
+  - CKV_AWS_297 # EventBridge Scheduler CMK
+  - CKV_AWS_119 # DynamoDB customer-managed CMK — literally requires a customer kms_key_arn (unlike the SNS/S3 checks, an AWS-managed alias doesn't satisfy it); the table already sets server_side_encryption with the AWS-managed alias/aws/dynamodb key (main.tf), a real step up from the invisible default at zero cost
+
+  # Log retention: 14 days is a deliberate cost choice (see main.tf /
+  # alerts.tf log groups) — no compliance mandate requires a year of logs
+  # for a personal project's debugging trail.
+  - CKV_AWS_338
+
+  # S3 controls that need a second bucket or cross-region setup — cost and
+  # complexity disproportionate to a personal static site + audit archive:
+  - CKV_AWS_18 # access logging — needs a dedicated log-target bucket
+  - CKV_AWS_144 # cross-region replication — no DR requirement here
+  - CKV_AWS_21 # versioning — site redeploys wholesale; archive objects are already timestamped per-fetch, not overwritten
+  - CKV2_AWS_62 # event notifications — no downstream consumer subscribes to bucket events

@@ -19,6 +19,8 @@ locals {
 }
 
 resource "aws_s3_bucket" "frontend" {
+  # checkov:skip=CKV2_AWS_61: static site bucket — OpenTofu overwrites the
+  # same keys in place on every deploy, nothing accumulates that needs expiry.
   bucket = "${local.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
 
   tags = {
@@ -33,6 +35,18 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+# AWS-managed key (aws/s3), not a customer CMK — same protection Checkov's
+# KMS check wants, zero monthly key cost.
+resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "aws:kms"
+    }
+  }
 }
 
 # Repo files, uploaded as-is. config.js is deliberately absent here — it is
@@ -61,6 +75,12 @@ resource "aws_s3_object" "frontend_config" {
       cesiumIonToken: "${var.cesium_ion_token}",
     };
   EOT
+}
+
+# AWS-managed policy (HSTS, X-Content-Type-Options, X-Frame-Options,
+# Referrer-Policy) — no custom rules needed, and it's free.
+data "aws_cloudfront_response_headers_policy" "security_headers" {
+  name = "Managed-SecurityHeadersPolicy"
 }
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
@@ -95,6 +115,23 @@ resource "aws_cloudfront_cache_policy" "frontend" {
 }
 
 resource "aws_cloudfront_distribution" "frontend" {
+  # checkov:skip=CKV_AWS_86: access logging needs a dedicated log bucket
+  #   (plus its own lifecycle/encryption) for a personal static site — not
+  #   worth the added bucket and cost.
+  # checkov:skip=CKV_AWS_310: origin failover needs a second S3 origin; one
+  #   bucket is the whole site, nothing to fail over to.
+  # checkov:skip=CKV_AWS_374: public tracker site, no geographic restriction
+  #   is called for.
+  # checkov:skip=CKV_AWS_174: minimum_protocol_version isn't configurable
+  #   with cloudfront_default_certificate — needs a custom domain + ACM
+  #   cert, which this project doesn't have (serves off *.cloudfront.net).
+  # checkov:skip=CKV_AWS_68: CloudFront WAF bills per web ACL/rule/request;
+  #   API Gateway throttling (api_gateway.tf) already caps the blast radius
+  #   for a hobby project with no attack surface beyond static assets.
+  # checkov:skip=CKV2_AWS_42: custom SSL cert needs the same custom domain
+  #   as CKV_AWS_174 above — not in place.
+  # checkov:skip=CKV2_AWS_47: depends on the WAF this project deliberately
+  #   skips (CKV_AWS_68).
   enabled             = true
   comment             = "${local.name_prefix} globe"
   default_root_object = "index.html"
@@ -107,12 +144,13 @@ resource "aws_cloudfront_distribution" "frontend" {
   }
 
   default_cache_behavior {
-    target_origin_id       = "s3-frontend"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = aws_cloudfront_cache_policy.frontend.id
-    compress               = true
+    target_origin_id           = "s3-frontend"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = aws_cloudfront_cache_policy.frontend.id
+    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
+    compress                   = true
   }
 
   restrictions {

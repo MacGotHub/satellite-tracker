@@ -30,6 +30,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Static IaC scan — gates the plan on insecure resource
+      # configuration before any AWS credentials are even requested.
+      # Pinned to the exact release (not a floating major tag) so CI
+      # behavior doesn't drift out from under .checkov.yaml, same
+      # reasoning as the tofu_version pin below. Accepted-risk findings
+      # live in .checkov.yaml (repo-wide) and inline `checkov:skip`
+      # comments (resource-specific) — see that file for the why.
+      - name: Checkov IaC scan
+        uses: bridgecrewio/checkov-action@v12.3114.0
+        with:
+          directory: opentofu
+          config_file: .checkov.yaml
+          framework: terraform
+          output_format: cli
+          compact: true
+          quiet: true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

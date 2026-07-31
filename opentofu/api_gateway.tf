@@ -31,11 +31,37 @@ resource "aws_apigatewayv2_integration" "api_lambda" {
 }
 
 resource "aws_apigatewayv2_route" "api" {
+  # checkov:skip=CKV_AWS_309: deliberate design — this is a public read-only
+  #   API for a public satellite tracker; there's no user/principal to
+  #   authenticate, and the throttle below is the actual abuse control.
   for_each = local.api_routes
 
   api_id    = aws_apigatewayv2_api.sattrack.id
   route_key = each.value
   target    = "integrations/${aws_apigatewayv2_integration.api_lambda.id}"
+}
+
+resource "aws_cloudwatch_log_group" "api_gateway" {
+  name              = "/aws/apigateway/${local.name_prefix}-api"
+  retention_in_days = 14
+}
+
+# HTTP APIs (apigatewayv2) deliver access logs via a resource policy on the
+# destination log group, not the account-level "CloudWatch Logs role ARN"
+# that REST APIs (v1) use — without this, the stage update fails (or logs
+# silently never arrive).
+resource "aws_cloudwatch_log_resource_policy" "api_gateway" {
+  policy_name = "${local.name_prefix}-api-gateway-logs"
+
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "apigateway.amazonaws.com" }
+      Action    = ["logs:CreateLogStream", "logs:PutLogEvents"]
+      Resource  = "${aws_cloudwatch_log_group.api_gateway.arn}:*"
+    }]
+  })
 }
 
 resource "aws_apigatewayv2_stage" "default" {
@@ -50,9 +76,22 @@ resource "aws_apigatewayv2_stage" "default" {
     throttling_rate_limit  = 10
   }
 
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_gateway.arn
+    format = jsonencode({
+      requestId      = "$context.requestId"
+      routeKey       = "$context.routeKey"
+      status         = "$context.status"
+      responseLength = "$context.responseLength"
+      integrationErr = "$context.integrationErrorMessage"
+    })
+  }
+
   tags = {
     Name = "${local.name_prefix}-api-default"
   }
+
+  depends_on = [aws_cloudwatch_log_resource_policy.api_gateway]
 }
 
 resource "aws_lambda_permission" "apigw_invoke_api" {

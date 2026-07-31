@@ -34,6 +34,21 @@ resource "aws_dynamodb_table" "sattrack" {
     enabled        = true
   }
 
+  # Switches from the invisible AWS-owned default key to the AWS-managed
+  # alias/aws/dynamodb key — still free, but now a real KMS key with its
+  # own CloudTrail usage trail. Checkov's CKV_AWS_119 specifically wants a
+  # customer-managed CMK ($1/mo); see .checkov.yaml for why that's skipped.
+  server_side_encryption {
+    enabled = true
+  }
+
+  # Table is a couple dozen items; PITR bills on backup storage, which is
+  # negligible at this size, for real protection against a bad apply/bug
+  # wiping the catalog.
+  point_in_time_recovery {
+    enabled = true
+  }
+
   tags = {
     Name = "sattrack"
   }
@@ -58,6 +73,45 @@ resource "aws_s3_bucket_public_access_block" "tle_archive" {
   block_public_policy     = true
   ignore_public_acls      = true
   restrict_public_buckets = true
+}
+
+# AWS-managed key (aws/s3), not a customer CMK — same protection Checkov's
+# KMS check wants, zero monthly key cost.
+resource "aws_s3_bucket_server_side_encryption_configuration" "tle_archive" {
+  bucket = aws_s3_bucket.tle_archive.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "aws:kms"
+    }
+  }
+}
+
+# This is a running archive (one object per fetch, every 2 hours forever)
+# with no reader beyond ad-hoc audit — without an expiry it grows without
+# bound. 90 days covers any plausible "what did CelesTrak send us" lookback.
+resource "aws_s3_bucket_lifecycle_configuration" "tle_archive" {
+  bucket = aws_s3_bucket.tle_archive.id
+
+  rule {
+    id     = "expire-after-90-days"
+    status = "Enabled"
+
+    # Applies to every object in the bucket — required by the provider
+    # even when there's nothing to filter on.
+    filter {}
+
+    expiration {
+      days = 90
+    }
+
+    # Belt-and-suspenders: cleans up any multipart upload that never
+    # completed (e.g. a killed Lambda mid-PutObject) instead of leaving
+    # orphaned parts billed forever.
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
 }
 
 # -----------------------------------------------

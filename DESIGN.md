@@ -285,20 +285,67 @@ that's the classic mistake this phase exists to demonstrate avoiding.
   an account can only have one provider per URL, and a duplicate attempt
   fails. If it exists, reference it as a data source instead of creating it.
 
-> **Open decision: security scanning in CI.** Given the "secure" pillar and
-> the DevSecOps framing, a static-analysis step on the OpenTofu code in CI
-> (e.g. **tfsec** or **checkov**) would strengthen the portfolio story —
-> "my pipeline blocks insecure infrastructure before it applies." Options:
->
-> 1. **tfsec** — fast, Terraform/OpenTofu-focused, trivially added as an
->    Actions step.
-> 2. **checkov** — broader coverage (Terraform plus other frameworks),
->    heavier, larger rule set.
-> 3. **Skip for now** — land plan/apply + OIDC first, add scanning as a
->    follow-up commit (which itself demos iterative pipeline hardening).
->
-> No commitment yet — decide when Phase 5 is underway. Whichever is chosen,
-> the pipeline shape (a scan job gating apply) is the same.
+**Security scanning in CI — resolved 2026-07-30: Checkov.** Landed as a
+follow-up commit after plan/apply + OIDC (per option 3 above, as it
+happened) — a static-analysis gate in both `plan.yml` and `apply.yml`,
+scanning `opentofu/` on every PR and again before every apply (so a direct
+push to main can't apply an insecure change unreviewed either). Checkov
+over tfsec: broader multi-framework policy-as-code coverage, and the
+closer analog to what Harness's IaCM/STO modules integrate — a more
+realistic "how a real platform team gates this" answer for the portfolio
+story than tfsec's lighter standalone-linter model.
+
+Ran a real scan against this repo before wiring up the gate (55 findings)
+rather than turning on a hard-fail blind: most were enterprise controls
+that fit a regulated multi-team environment, not a $0-marginal-cost hobby
+project (customer-managed KMS CMKs, Lambda-in-VPC, WAF, cross-region
+replication, code signing — see "What NOT to Do" / "Cost Posture" above).
+Triage split three ways:
+
+1. **Genuinely free fixes, applied**: AWS-managed KMS keys (not customer
+   CMKs) for DynamoDB, S3 (both buckets), and SNS — a real step up from
+   the invisible default encryption at zero monthly cost; a CloudFront
+   managed response-headers policy; API Gateway access logging (which
+   turned out to need its own gotcha — see below); DynamoDB
+   point-in-time-recovery (negligible cost at ~26 items); an S3 lifecycle
+   rule expiring the TLE archive after 90 days.
+2. **Accepted-risk, declined by design**: `.checkov.yaml` (repo root) for
+   checks that recur across every Lambda/log-group/bucket — VPC, WAF,
+   customer CMKs, code signing, DLQ, reserved concurrency, X-Ray, S3
+   access-logging/versioning/replication/event-notifications, >1yr log
+   retention. Each has an inline rationale in that file. Resource-specific
+   exceptions (CloudFront's TLS-min-version/custom-cert/geo-restriction/
+   origin-failover, the API's no-auth-by-design) live as `checkov:skip`
+   comments next to the resource in `frontend.tf`/`api_gateway.tf`.
+3. **Genuinely new engineering, done anyway**: `CKV_AWS_76` (API Gateway
+   access logging) surfaced a real gap, not just a scanner nit — HTTP
+   APIs (apigatewayv2) deliver access logs via a CloudWatch Logs
+   *resource policy* on the destination log group, unlike REST APIs'
+   account-level "CloudWatch role ARN" setting. Missing it means the
+   stage update silently never delivers logs. Added
+   `aws_cloudwatch_log_resource_policy` in `api_gateway.tf` with an
+   explicit `depends_on` so it's created before the stage references it.
+
+**Gotcha:** Checkov's inline `# checkov:skip=ID:reason` suppression only
+works if the comment sits *inside* the resource block (any line strictly
+between its opening and closing brace) — placing it on the line
+immediately *before* the resource, which is how most examples online show
+it, is silently ignored. Confirmed by reading
+`checkov/terraform/context_parsers/base_parser.py`'s
+`_collect_skip_comments`: it only attaches a skip comment to a resource
+when `start_line < skip_check_line_num < end_line` (strict inequality on
+both ends — the boundary lines themselves don't count either).
+
+**Gotcha:** `CKV_AWS_119` (DynamoDB KMS) and `CKV_AWS_26`/`CKV_AWS_145`
+(SNS/S3 KMS) look like the same "add a KMS key" ask but aren't — the
+SNS/S3 checks are satisfied by *any* `kms_master_key_id`/`aws:kms`
+setting, including the free AWS-managed key alias. `CKV_AWS_119`'s Python
+check (`DynamoDBTablesEncrypted`) literally requires a populated
+`kms_key_arn` — by definition a customer-managed key, since
+`alias/aws/dynamodb` is exactly the default it's checking you moved away
+from. No free path exists for that one; it's in the accepted-risk skip
+list with the real (if lesser) improvement — AWS-managed-key
+`server_side_encryption` — still applied in `main.tf`.
 
 ---
 

@@ -28,6 +28,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Same scan as plan.yml, run again here so a direct push to main
+      # (bypassing a PR) can't apply an insecure change unreviewed —
+      # plan.yml gates PRs, this gates the thing that actually mutates AWS.
+      - name: Checkov IaC scan
+        uses: bridgecrewio/checkov-action@v12.3114.0
+        with:
+          directory: opentofu
+          config_file: .checkov.yaml
+          framework: terraform
+          output_format: cli
+          compact: true
+          quiet: true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

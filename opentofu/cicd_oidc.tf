@@ -203,10 +203,13 @@ resource "aws_iam_policy" "gha_read" {
         # The AWS provider calls the newer ListTagsForResource, not the
         # deprecated ListTagsLogGroup — and unlike DescribeLogGroups above,
         # this one DOES want the plain group ARN (no trailing :*).
-        Sid      = "LogsReadTags"
-        Effect   = "Allow"
-        Action   = "logs:ListTagsForResource"
-        Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*"
+        Sid    = "LogsReadTags"
+        Effect = "Allow"
+        Action = "logs:ListTagsForResource"
+        Resource = [
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*",
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${local.name_prefix}-*",
+        ]
       },
       {
         # DescribeLogGroups is a list operation across the whole
@@ -221,6 +224,14 @@ resource "aws_iam_policy" "gha_read" {
         Resource = "*"
       },
       {
+        # Same story as DescribeLogGroups above — resource policies are an
+        # account-wide list, no per-policy ARN to scope to.
+        Sid      = "LogsResourcePolicyRead"
+        Effect   = "Allow"
+        Action   = "logs:DescribeResourcePolicies"
+        Resource = "*"
+      },
+      {
         Sid      = "ApiGatewayRead"
         Effect   = "Allow"
         Action   = "apigateway:GET"
@@ -229,9 +240,15 @@ resource "aws_iam_policy" "gha_read" {
       {
         # CloudFront has no resource-level IAM support for these actions —
         # AWS requires Resource "*" regardless of which distribution.
-        Sid      = "CloudFrontRead"
-        Effect   = "Allow"
-        Action   = ["cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:ListTagsForResource", "cloudfront:GetCachePolicy", "cloudfront:GetOriginAccessControl"]
+        Sid    = "CloudFrontRead"
+        Effect = "Allow"
+        Action = [
+          "cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:ListTagsForResource",
+          "cloudfront:GetCachePolicy", "cloudfront:GetOriginAccessControl",
+          # The response-headers policy is an AWS-managed one looked up by
+          # name (data source) — read-only, but needed at plan time too.
+          "cloudfront:GetResponseHeadersPolicy", "cloudfront:ListResponseHeadersPolicies",
+        ]
         Resource = "*"
       },
     ]
@@ -269,9 +286,12 @@ resource "aws_iam_policy" "gha_write" {
         Resource = "arn:aws:s3:::351668480009-opentofu-state/sattrack/tle-pipeline/*"
       },
       {
-        Sid      = "DynamoDbWrite"
-        Effect   = "Allow"
-        Action   = ["dynamodb:UpdateTable", "dynamodb:UpdateTimeToLive", "dynamodb:TagResource", "dynamodb:UntagResource"]
+        Sid    = "DynamoDbWrite"
+        Effect = "Allow"
+        Action = [
+          "dynamodb:UpdateTable", "dynamodb:UpdateTimeToLive", "dynamodb:TagResource", "dynamodb:UntagResource",
+          "dynamodb:UpdateContinuousBackups", # point-in-time recovery toggle
+        ]
         Resource = aws_dynamodb_table.sattrack.arn
       },
       {
@@ -279,7 +299,7 @@ resource "aws_iam_policy" "gha_write" {
         Effect = "Allow"
         Action = [
           "s3:PutBucketPolicy", "s3:PutBucketPublicAccessBlock", "s3:PutBucketTagging",
-          "s3:PutEncryptionConfiguration"
+          "s3:PutEncryptionConfiguration", "s3:PutLifecycleConfiguration"
         ]
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
       },
@@ -359,7 +379,17 @@ resource "aws_iam_policy" "gha_write" {
         Resource = [
           "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*",
           "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*:*",
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${local.name_prefix}-*",
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${local.name_prefix}-*:*",
         ]
+      },
+      {
+        # Same story as LogsDescribe/LogsResourcePolicyRead — account-wide,
+        # no per-policy ARN to scope to.
+        Sid      = "LogsResourcePolicyWrite"
+        Effect   = "Allow"
+        Action   = ["logs:PutResourcePolicy", "logs:DeleteResourcePolicy"]
+        Resource = "*"
       },
       {
         # apigatewayv2's IAM model is action-on-path, not action-on-name —

@@ -60,6 +60,7 @@ satellite-tracker/
 ├── CLAUDE.md                  # This file ✓
 ├── DESIGN.md                  # Architecture rationale ✓
 ├── pytest.ini                 # Test config (pythonpath=., tests/) ✓
+├── .checkov.yaml               # Phase 5 — repo-wide accepted-risk skip list (see DESIGN.md) ✓
 ├── opentofu/                  # All IaC (single root module)
 │   ├── backend.tf             # S3 remote state (351668480009-opentofu-state, key sattrack/tle-pipeline) ✓
 │   ├── providers.tf           # AWS ~>5.0 + archive providers, us-east-1 ✓
@@ -307,6 +308,28 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     only `GetObject` + lock-table access had been granted). Real infra
     was briefly ahead of remote state; reconciled locally, permission
     added, `tofu plan` confirmed clean before moving on
+  - **Checkov IaC gate — added 2026-07-30** (the one open decision Phase 5
+    left unresolved): both `plan.yml` and `apply.yml` now run
+    `bridgecrewio/checkov-action` (pinned to `v12.3114.0`, matching the
+    `tofu_version` pinning philosophy) against `opentofu/` before anything
+    else. Accepted-risk findings live in `.checkov.yaml` (repo-wide) and
+    inline `checkov:skip` comments (resource-specific) — see DESIGN.md's
+    "Security scanning in CI" section for the full triage and two gotchas
+    worth knowing before touching either: (1) inline skip comments only
+    work *inside* the resource block, not on the line before it; (2)
+    enabling this surfaced a real gap, not just scanner noise — HTTP API
+    access logging needed a `aws_cloudwatch_log_resource_policy` that
+    nothing had required before. Also added while the IAM policies were
+    open: AWS-managed-key encryption for DynamoDB/S3/SNS, DynamoDB PITR,
+    a CloudFront managed security-headers policy, and a 90-day lifecycle
+    on the TLE archive bucket — all free wins with zero blast radius. This
+    round also touched `sattrack-gha-read`/`sattrack-gha-write` in
+    `cicd_oidc.tf` to grant the new actions these resources need
+    (`s3:PutLifecycleConfiguration`, `dynamodb:UpdateContinuousBackups`,
+    `logs:PutResourcePolicy`/`DescribeResourcePolicies`, the new
+    `/aws/apigateway/sattrack-*` log-group ARN pattern,
+    `cloudfront:GetResponseHeadersPolicy`) — same "grow the policy in the
+    same PR" discipline as everything else in that file.
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
