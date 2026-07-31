@@ -52,6 +52,15 @@ resource "aws_dynamodb_table" "sattrack" {
   tags = {
     Name = "sattrack"
   }
+
+  # dynamodb:UpdateContinuousBackups (for point_in_time_recovery above) is
+  # new in gha_write as of this same change — without this, CI applies the
+  # table update in parallel with the policy update and can lose the race
+  # (confirmed: it did, on the first attempt). See the DynamoDbWrite
+  # comment in cicd_oidc.tf for why that statement's Resource is a literal
+  # ARN instead of a reference — an attribute reference here would make
+  # this depends_on a cycle.
+  depends_on = [aws_iam_role_policy_attachment.gha_apply_write_bootstrap]
 }
 
 # -----------------------------------------------
@@ -112,6 +121,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "tle_archive" {
       days_after_initiation = 7
     }
   }
+
+  # s3:PutLifecycleConfiguration is new in gha_write as of this same
+  # change — same race as the DynamoDB table above without this.
+  depends_on = [aws_iam_role_policy_attachment.gha_apply_write_bootstrap]
 }
 
 # -----------------------------------------------

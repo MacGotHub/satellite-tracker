@@ -370,6 +370,32 @@ reasoning in the comment. General lesson: a data source that only a
 that grants it — hardcode the value if it's a stable constant, or split
 into two applies if it isn't.
 
+**Gotcha (second apply failure, same batch):** fixing the above wasn't
+the whole story — the *next* run failed with three more AccessDenied
+errors (`logs:CreateLogGroup` on the new `/aws/apigateway/*` pattern,
+`dynamodb:UpdateContinuousBackups`, `s3:PutLifecycleConfiguration`), the
+identical class of bug: new actions added to `gha_write` in the same
+apply that uses them, and OpenTofu doesn't serialize otherwise-unrelated
+resource applies. The obvious fix — `depends_on = [aws_iam_policy.gha_write]`
+on the resources needing the new actions — hit a dependency **cycle**:
+`gha_write` is one Terraform resource, so it has an edge to *every*
+resource any of its statements reference, across the whole policy, not
+just the statement relevant to a given action. `aws_dynamodb_table.sattrack`
+already flows into `gha_write` (its `DynamoDbWrite` statement's `Resource`
+was `aws_dynamodb_table.sattrack.arn`) — and it turns out `gha_write` also
+flows back to the table transitively through `aws_lambda_function.tle_fetcher`
+(env var `TABLE_NAME = aws_dynamodb_table.sattrack.name`) and
+`aws_scheduler_schedule.tle_fetcher`. Fix: don't try to depends_on the
+big cross-referenced policy at all — put the handful of brand-new actions
+in a separate `aws_iam_policy.gha_write_bootstrap` (see `cicd_oidc.tf`)
+with every `Resource` hand-built as a string, zero attribute references,
+so it has no edges into the rest of the graph — then the dependent
+resources safely `depends_on` *that* attachment instead. Lesson underneath
+the lesson: in a policy document built from `for_each`/reference-heavy
+locals, "add a new permission for a new resource" and "let that new
+resource depend on the policy" are not automatically compatible — check
+what else the policy already references before wiring up depends_on.
+
 ---
 
 ## Build Order and Dependencies

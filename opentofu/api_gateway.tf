@@ -44,6 +44,12 @@ resource "aws_apigatewayv2_route" "api" {
 resource "aws_cloudwatch_log_group" "api_gateway" {
   name              = "/aws/apigateway/${local.name_prefix}-api"
   retention_in_days = 14
+
+  # logs:CreateLogGroup on this /aws/apigateway/* ARN pattern is new in
+  # gha_write as of this same change — without this, CI can create the log
+  # group in parallel with the policy update and lose the race (confirmed:
+  # it did, on the first attempt).
+  depends_on = [aws_iam_role_policy_attachment.gha_apply_write_bootstrap]
 }
 
 # HTTP APIs (apigatewayv2) deliver access logs via a resource policy on the
@@ -62,6 +68,9 @@ resource "aws_cloudwatch_log_resource_policy" "api_gateway" {
       Resource  = "${aws_cloudwatch_log_group.api_gateway.arn}:*"
     }]
   })
+
+  # logs:PutResourcePolicy is new in gha_write too — same race risk.
+  depends_on = [aws_iam_role_policy_attachment.gha_apply_write_bootstrap]
 }
 
 resource "aws_apigatewayv2_stage" "default" {

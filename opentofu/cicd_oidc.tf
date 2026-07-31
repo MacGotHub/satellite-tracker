@@ -280,12 +280,9 @@ resource "aws_iam_policy" "gha_write" {
         Resource = "arn:aws:s3:::351668480009-opentofu-state/sattrack/tle-pipeline/*"
       },
       {
-        Sid    = "DynamoDbWrite"
-        Effect = "Allow"
-        Action = [
-          "dynamodb:UpdateTable", "dynamodb:UpdateTimeToLive", "dynamodb:TagResource", "dynamodb:UntagResource",
-          "dynamodb:UpdateContinuousBackups", # point-in-time recovery toggle
-        ]
+        Sid      = "DynamoDbWrite"
+        Effect   = "Allow"
+        Action   = ["dynamodb:UpdateTable", "dynamodb:UpdateTimeToLive", "dynamodb:TagResource", "dynamodb:UntagResource"]
         Resource = aws_dynamodb_table.sattrack.arn
       },
       {
@@ -293,7 +290,7 @@ resource "aws_iam_policy" "gha_write" {
         Effect = "Allow"
         Action = [
           "s3:PutBucketPolicy", "s3:PutBucketPublicAccessBlock", "s3:PutBucketTagging",
-          "s3:PutEncryptionConfiguration", "s3:PutLifecycleConfiguration"
+          "s3:PutEncryptionConfiguration"
         ]
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
       },
@@ -373,17 +370,7 @@ resource "aws_iam_policy" "gha_write" {
         Resource = [
           "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*",
           "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*:*",
-          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${local.name_prefix}-*",
-          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${local.name_prefix}-*:*",
         ]
-      },
-      {
-        # Same story as LogsDescribe/LogsResourcePolicyRead — account-wide,
-        # no per-policy ARN to scope to.
-        Sid      = "LogsResourcePolicyWrite"
-        Effect   = "Allow"
-        Action   = ["logs:PutResourcePolicy", "logs:DeleteResourcePolicy"]
-        Resource = "*"
       },
       {
         # apigatewayv2's IAM model is action-on-path, not action-on-name —
@@ -420,4 +407,74 @@ resource "aws_iam_policy" "gha_write" {
 resource "aws_iam_role_policy_attachment" "gha_apply_write" {
   role       = aws_iam_role.gha_apply.name
   policy_arn = aws_iam_policy.gha_write.arn
+}
+
+# -----------------------------------------------
+# Permissions — write "bootstrap" policy (apply role only)
+#
+# gha_write above is deeply cross-referenced — nearly every statement's
+# Resource points at another resource's .arn, which means gha_write
+# transitively depends on almost everything else in this module (the
+# Lambda functions, the DynamoDB table, the scheduler...). That makes it
+# impossible for anything ELSE to depends_on gha_write without risking a
+# cycle: confirmed the hard way when aws_dynamodb_table.sattrack ->
+# gha_write -> aws_lambda_function.tle_fetcher -> aws_dynamodb_table.sattrack
+# (via the Lambda's TABLE_NAME env var) closed the loop.
+#
+# Every action below is brand new as of the same change that introduced
+# the resources needing it (DynamoDB PITR, the TLE archive's lifecycle
+# rule, the API Gateway log group + its resource policy) — so unlike
+# gha_write's existing grants, these can't rely on "the permission was
+# already live before this apply." Kept in a separate policy with every
+# Resource hand-built as a string (no attribute references at all) so it
+# has zero edges into the rest of the graph, and the handful of resources
+# that need these specific actions can safely depends_on this attachment
+# to guarantee ordering within a single apply.
+# -----------------------------------------------
+
+resource "aws_iam_policy" "gha_write_bootstrap" {
+  name = "${local.name_prefix}-gha-write-bootstrap"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "DynamoDbPitrWrite"
+        Effect   = "Allow"
+        Action   = "dynamodb:UpdateContinuousBackups"
+        Resource = "arn:aws:dynamodb:us-east-1:${data.aws_caller_identity.current.account_id}:table/sattrack"
+      },
+      {
+        Sid    = "S3LifecycleWrite"
+        Effect = "Allow"
+        Action = "s3:PutLifecycleConfiguration"
+        Resource = [
+          "arn:aws:s3:::sattrack-tle-archive-${data.aws_caller_identity.current.account_id}",
+          "arn:aws:s3:::${local.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}",
+        ]
+      },
+      {
+        Sid    = "ApiGatewayLogsWrite"
+        Effect = "Allow"
+        Action = ["logs:CreateLogGroup", "logs:PutRetentionPolicy", "logs:TagResource"]
+        Resource = [
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${local.name_prefix}-*",
+          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${local.name_prefix}-*:*",
+        ]
+      },
+      {
+        # Account-wide, no per-policy ARN to scope to — same story as
+        # LogsDescribe/LogsResourcePolicyRead in gha_read.
+        Sid      = "LogsResourcePolicyWrite"
+        Effect   = "Allow"
+        Action   = ["logs:PutResourcePolicy", "logs:DeleteResourcePolicy"]
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "gha_apply_write_bootstrap" {
+  role       = aws_iam_role.gha_apply.name
+  policy_arn = aws_iam_policy.gha_write_bootstrap.arn
 }
