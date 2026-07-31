@@ -456,6 +456,55 @@ bootstrap-policy-plus-sleep on **both** the write side and the read side
 — the read side's failure mode is just quieter (a stuck/tainted resource,
 not a loud config error) so it surfaces one round later.
 
+**Gotcha (sixth apply failure — refresh happens outside the dependency
+graph entirely):** the read-bootstrap fix above still didn't clear the
+log group error, and this time the apply log showed *no* "Modifying..."
+line for anything at all before the failure — it happened during
+OpenTofu's state **refresh** step, which runs before the plan/apply graph
+is even built. A resource already tracked in state (the log group,
+tainted from an earlier partial failure but still real in AWS) gets its
+current attributes — including tags — read back on every single
+plan/apply, unconditionally, regardless of any `depends_on` wiring.
+`depends_on` only orders the *apply* graph; it has no effect on refresh.
+Fixed by deleting the actual AWS log group directly (`aws logs
+delete-log-group`) so the next run's refresh finds nothing to read (a
+clean "gone from state," not an authorization failure) and creates it
+fresh instead — a genuine create *does* respect `depends_on`. General
+rule: a stuck/tainted resource that requires a not-yet-granted
+permission just to refresh can't be un-stuck by any Terraform-side
+dependency fix — the underlying resource has to be removed out-of-band
+first.
+
+**Gotcha (same run, once refresh stopped being the blocker): two
+permissions were still missing outright, not just racing.** (1)
+`gha_write` had *never* actually received the `iam:ListPolicyVersions`
+grant from the fourth-failure fix — every prior run failed before ever
+reaching gha_write's own update in the graph, so the fix sat correct in
+git the whole time without ever reaching AWS. Broken by manually
+creating a new policy version via the AWS CLI (using admin credentials,
+outside Terraform) with exactly the one action added — the same
+"someone with more permission than the CI role has to make the first
+move" pattern as gotcha #4, just discovered a run later because the
+refresh bug upstream of it had been masking it too. (2) API Gateway v2
+access logging turned out to need a wholly separate permission surface —
+`logs:CreateLogDelivery`/`GetLogDelivery`/`UpdateLogDelivery`/
+`DeleteLogDelivery`/`ListLogDeliveries` — distinct from plain log-group
+writes; AWS's CloudWatch "log delivery" objects have their own opaque
+IDs with nothing meaningful to scope `Resource` to, so `"*"` is the
+correct scope here, not a shortcut. Added to `gha_write_bootstrap`
+alongside the existing log-group actions.
+
+Running tally: getting one CI-managed IaC security gate through its
+*first* real apply took six failed runs across four distinct root causes
+(a data-source read racing its own permission grant, a policy so
+cross-referenced that `depends_on` created a cycle, IAM's eventual
+consistency after a correctly-ordered grant, and two flavors of "the fix
+never actually reached AWS because something upstream failed first").
+None of these would show up in `tofu plan` locally with admin
+credentials — they are specifically CI-scoped-role problems, which is
+exactly why Phase 5 flagged this as the "AccessDenied afternoon" before
+a single line of Phase 5 code existed.
+
 ---
 
 ## Build Order and Dependencies

@@ -109,7 +109,12 @@ resource "aws_apigatewayv2_stage" "default" {
     Name = "${local.name_prefix}-api-default"
   }
 
-  depends_on = [aws_cloudwatch_log_resource_policy.api_gateway]
+  # access_log_settings needs logs:CreateLogDelivery (gha_write_bootstrap)
+  # in addition to the resource policy above.
+  depends_on = [
+    aws_cloudwatch_log_resource_policy.api_gateway,
+    time_sleep.gha_write_bootstrap_propagation,
+  ]
 }
 
 resource "aws_lambda_permission" "apigw_invoke_api" {

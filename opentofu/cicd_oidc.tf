@@ -531,6 +531,22 @@ resource "aws_iam_policy" "gha_write_bootstrap" {
         Action   = ["logs:PutResourcePolicy", "logs:DeleteResourcePolicy"]
         Resource = "*"
       },
+      {
+        # API Gateway v2 access logging is implemented via CloudWatch's
+        # "log delivery" mechanism, a separate permission surface from
+        # plain log group writes — enabling access_log_settings on the
+        # stage needs this even though the log group itself is already
+        # writable. Log delivery objects have their own opaque IDs (not
+        # ARNs derived from the log group), so there's nothing meaningful
+        # to scope Resource to — AWS's own docs for this feature use "*".
+        Sid    = "LogsDeliveryWrite"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogDelivery", "logs:GetLogDelivery", "logs:UpdateLogDelivery",
+          "logs:DeleteLogDelivery", "logs:ListLogDeliveries",
+        ]
+        Resource = "*"
+      },
     ]
   })
 }
