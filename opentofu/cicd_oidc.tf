@@ -327,10 +327,18 @@ resource "aws_iam_policy" "gha_write" {
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-*"
       },
       {
+        # IAM caps customer-managed policies at 5 versions — gha_read and
+        # gha_write both hit that cap this session (this repo's own commit
+        # history is the reason: every commit that touches either policy
+        # burns a version). Past the cap, an update must delete an old
+        # version before creating the new one, which needs
+        # ListPolicyVersions to find a candidate — missing that action is
+        # a real deadlock, not just an AccessDenied: gha_apply can't grant
+        # itself this permission via an update that itself needs it.
         Sid    = "OwnPolicyWrite"
         Effect = "Allow"
         Action = [
-          "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion",
+          "iam:CreatePolicy", "iam:CreatePolicyVersion", "iam:DeletePolicyVersion", "iam:ListPolicyVersions",
           "iam:DeletePolicy", "iam:TagPolicy", "iam:UntagPolicy"
         ]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name_prefix}-gha-*"
