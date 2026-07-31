@@ -54,13 +54,12 @@ resource "aws_dynamodb_table" "sattrack" {
   }
 
   # dynamodb:UpdateContinuousBackups (for point_in_time_recovery above) is
-  # new in gha_write as of this same change — without this, CI applies the
-  # table update in parallel with the policy update and can lose the race
-  # (confirmed: it did, on the first attempt). See the DynamoDbWrite
-  # comment in cicd_oidc.tf for why that statement's Resource is a literal
-  # ARN instead of a reference — an attribute reference here would make
-  # this depends_on a cycle.
-  depends_on = [aws_iam_role_policy_attachment.gha_apply_write_bootstrap]
+  # granted by gha_write_bootstrap (cicd_oidc.tf), not the main gha_write
+  # policy — that policy is too cross-referenced to safely depend on
+  # without a cycle. Waits on the propagation delay too, not just the
+  # attachment: the grant existing isn't enough, IAM needs a moment to
+  # actually honor it (see the time_sleep comment in cicd_oidc.tf).
+  depends_on = [time_sleep.gha_write_bootstrap_propagation]
 }
 
 # -----------------------------------------------
@@ -122,9 +121,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "tle_archive" {
     }
   }
 
-  # s3:PutLifecycleConfiguration is new in gha_write as of this same
-  # change — same race as the DynamoDB table above without this.
-  depends_on = [aws_iam_role_policy_attachment.gha_apply_write_bootstrap]
+  # s3:PutLifecycleConfiguration comes from gha_write_bootstrap — same
+  # reasoning as the DynamoDB table's depends_on above.
+  depends_on = [time_sleep.gha_write_bootstrap_propagation]
 }
 
 # -----------------------------------------------

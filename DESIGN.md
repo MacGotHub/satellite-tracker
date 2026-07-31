@@ -396,6 +396,32 @@ locals, "add a new permission for a new resource" and "let that new
 resource depend on the policy" are not automatically compatible — check
 what else the policy already references before wiring up depends_on.
 
+**Gotcha (third apply failure, same batch — the cycle fix wasn't enough
+either):** the *exact same three* AccessDenied errors came back on the
+next run, even with the cycle-free bootstrap policy and correct
+`depends_on` in place. The timestamps in the run log proved the ordering
+really was correct this time — `aws_iam_role_policy_attachment.gha_apply_write_bootstrap`
+completed at `03:39:56.43`, and the AccessDenied hit about one second
+later, at `03:39:57.45`. That's not an ordering bug, it's IAM's eventual
+consistency: the attach API call returning success doesn't mean every AWS
+authorization backend has the new policy yet, especially for a role that
+already has an active assumed-role session mid-apply. Terraform can't see
+or wait for that — it only knows the API call returned 200. Fixed with
+the standard pattern for exactly this problem: a
+`time_sleep.gha_write_bootstrap_propagation` resource (`hashicorp/time`
+provider, added to `providers.tf`) with a 10s `create_duration`,
+`depends_on` the attachment; the three dependent resources `depends_on`
+the sleep instead of the attachment directly. Three-gotcha lesson,
+stacked: (1) data sources read before the same apply's own permission
+grants land, (2) a cross-referenced IAM policy can't safely be
+`depends_on`-ed without checking for cycles through unrelated statements,
+(3) even a correctly-ordered IAM change needs a deliberate propagation
+gap before anything downstream uses it. All three are one root cause —
+granting a permission and consuming it in the same `tofu apply` is
+inherently fragile — with three different symptoms depending on exactly
+how the consuming resource gets its value (a data source, a resource
+attribute reference, or a plain sequential API call).
+
 ---
 
 ## Build Order and Dependencies

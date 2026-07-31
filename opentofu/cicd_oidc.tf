@@ -478,3 +478,15 @@ resource "aws_iam_role_policy_attachment" "gha_apply_write_bootstrap" {
   role       = aws_iam_role.gha_apply.name
   policy_arn = aws_iam_policy.gha_write_bootstrap.arn
 }
+
+# Confirmed the hard way: even after fixing the dependency ordering above
+# (the attachment really was created first — the timestamps proved it),
+# the very next AWS calls still got AccessDenied, about a second later.
+# IAM policy attachment is eventually consistent — the API call
+# succeeding doesn't mean every AWS backend has the update yet. The
+# resources that need these new actions depend on this instead of the
+# attachment directly, to force a deliberate gap.
+resource "time_sleep" "gha_write_bootstrap_propagation" {
+  depends_on      = [aws_iam_role_policy_attachment.gha_apply_write_bootstrap]
+  create_duration = "10s"
+}
