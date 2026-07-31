@@ -422,6 +422,40 @@ inherently fragile — with three different symptoms depending on exactly
 how the consuming resource gets its value (a data source, a resource
 attribute reference, or a plain sequential API call).
 
+**Gotcha (fourth apply failure — a genuine deadlock, not just a race):**
+`aws iam list-policy-versions` on both `gha_read` and `gha_write` showed
+exactly 5/5 — IAM's hard cap on customer-managed policy versions,
+reached simply from the number of times this session updated them.
+Past the cap, an update must delete an old version before creating the
+new one, which needs `iam:ListPolicyVersions` — an action neither policy
+granted itself. This one is unfixable by CI alone: `gha_apply` can't grant
+itself a permission via an update that itself requires that permission to
+execute. Required a one-time intervention from credentials that already
+had `iam:ListPolicyVersions` (an admin AWS CLI session) to delete one old
+version from each policy, freeing a slot so the *next* `CreatePolicyVersion`
+call succeeds outright — bypassing the need to list/prune this once. That
+next version permanently includes `iam:ListPolicyVersions`, so every
+future cap-hit self-heals through CI without help.
+
+**Gotcha (fifth apply failure — the read-side mirror of gotcha #3):**
+even with the version cap cleared, the API Gateway log group's post-create
+tag read (`logs:ListTagsForResource`) failed — `gha_read`'s own update
+(to cover the new `/aws/apigateway/*` pattern) hadn't even *started*
+before the read happened, confirmed by its absence from the apply log
+entirely (only a "Refreshing state" line, no "Modifying..."). Same root
+cause as the write-side bootstrap problem, just discovered later because
+the write-side race had been masking it — you can't observe a read-side
+ordering bug on a resource that never finishes creating. Fixed with the
+mirror-image solution: a `gha_read_bootstrap` policy (the new
+`/aws/apigateway/*` tag-read pattern, plus `logs:DescribeResourcePolicies`)
+attached to both roles, gated by its own `time_sleep`, with the log group
+and log resource policy `depends_on` both sleeps (read and write). Net
+lesson across all five: when a change adds both new resources *and* new
+permissions for those resources in the same apply, budget for a
+bootstrap-policy-plus-sleep on **both** the write side and the read side
+— the read side's failure mode is just quieter (a stuck/tainted resource,
+not a loud config error) so it surfaces one round later.
+
 ---
 
 ## Build Order and Dependencies

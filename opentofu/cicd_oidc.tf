@@ -202,14 +202,13 @@ resource "aws_iam_policy" "gha_read" {
       {
         # The AWS provider calls the newer ListTagsForResource, not the
         # deprecated ListTagsLogGroup — and unlike DescribeLogGroups above,
-        # this one DOES want the plain group ARN (no trailing :*).
-        Sid    = "LogsReadTags"
-        Effect = "Allow"
-        Action = "logs:ListTagsForResource"
-        Resource = [
-          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*",
-          "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${local.name_prefix}-*",
-        ]
+        # this one DOES want the plain group ARN (no trailing :*). The
+        # /aws/apigateway/* pattern lives in gha_read_bootstrap instead —
+        # see that resource for why.
+        Sid      = "LogsReadTags"
+        Effect   = "Allow"
+        Action   = "logs:ListTagsForResource"
+        Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${local.name_prefix}-*"
       },
       {
         # DescribeLogGroups is a list operation across the whole
@@ -221,14 +220,6 @@ resource "aws_iam_policy" "gha_read" {
         Sid      = "LogsDescribe"
         Effect   = "Allow"
         Action   = "logs:DescribeLogGroups"
-        Resource = "*"
-      },
-      {
-        # Same story as DescribeLogGroups above — resource policies are an
-        # account-wide list, no per-policy ARN to scope to.
-        Sid      = "LogsResourcePolicyRead"
-        Effect   = "Allow"
-        Action   = "logs:DescribeResourcePolicies"
         Resource = "*"
       },
       {
@@ -257,6 +248,68 @@ resource "aws_iam_role_policy_attachment" "gha_plan_read" {
 resource "aws_iam_role_policy_attachment" "gha_apply_read" {
   role       = aws_iam_role.gha_apply.name
   policy_arn = aws_iam_policy.gha_read.arn
+}
+
+# -----------------------------------------------
+# Permissions — read "bootstrap" policy (both roles)
+#
+# Same problem as gha_write_bootstrap below, on the read side: gha_read is
+# just as cross-referenced as gha_write (table, buckets, Lambdas, SNS,
+# scheduler, the API...), so a new resource that needs a new read action
+# can't safely depends_on gha_read directly, and even a safe depends_on
+# isn't enough on its own — IAM's propagation delay bit this exact case
+# (confirmed: aws_cloudwatch_log_group.api_gateway's post-create tag read
+# failed because gha_read's own update to cover its ARN hadn't even
+# started, let alone propagated, by the time the read happened).
+#
+# Every action below is brand new as of the same change that introduced
+# /aws/apigateway/* log groups and the log resource policy. Kept separate
+# with hand-built Resource strings (no attribute references) for the same
+# reason gha_write_bootstrap is separate — zero edges into the rest of
+# the graph, so anything needing these specific actions can safely
+# depends_on the propagation sleep below.
+# -----------------------------------------------
+
+resource "aws_iam_policy" "gha_read_bootstrap" {
+  name = "${local.name_prefix}-gha-read-bootstrap"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "ApiGatewayLogsReadTags"
+        Effect   = "Allow"
+        Action   = "logs:ListTagsForResource"
+        Resource = "arn:aws:logs:us-east-1:${data.aws_caller_identity.current.account_id}:log-group:/aws/apigateway/${local.name_prefix}-*"
+      },
+      {
+        # Account-wide, no per-policy ARN to scope to — same story as
+        # DescribeLogGroups in gha_read.
+        Sid      = "LogsResourcePolicyRead"
+        Effect   = "Allow"
+        Action   = "logs:DescribeResourcePolicies"
+        Resource = "*"
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "gha_plan_read_bootstrap" {
+  role       = aws_iam_role.gha_plan.name
+  policy_arn = aws_iam_policy.gha_read_bootstrap.arn
+}
+
+resource "aws_iam_role_policy_attachment" "gha_apply_read_bootstrap" {
+  role       = aws_iam_role.gha_apply.name
+  policy_arn = aws_iam_policy.gha_read_bootstrap.arn
+}
+
+resource "time_sleep" "gha_read_bootstrap_propagation" {
+  depends_on = [
+    aws_iam_role_policy_attachment.gha_plan_read_bootstrap,
+    aws_iam_role_policy_attachment.gha_apply_read_bootstrap,
+  ]
+  create_duration = "10s"
 }
 
 # -----------------------------------------------
