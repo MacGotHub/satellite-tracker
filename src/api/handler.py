@@ -63,8 +63,16 @@ def _get_item(norad_id: str):
 def _scan_catalog() -> list:
     # The catalog is a couple dozen items; a Scan is the right tool here.
     # Revisit only if the watchlist ever grows past a single page (1 MB).
+    #
+    # Since Phase 4, this table also holds alert-dedupe items
+    # (sk = ALERT#<rise> / DIGEST#<rise>) alongside each satellite's TLE
+    # item — filter to TLE records only, or those get scanned too and
+    # blow up _satellite_from_item with a KeyError on line1/line2.
     items = []
-    kwargs = {}
+    kwargs = {
+        "FilterExpression": "sk = :sk",
+        "ExpressionAttributeValues": {":sk": "TLE"},
+    }
     while True:
         page = _catalog_table().scan(**kwargs)
         items.extend(page["Items"])

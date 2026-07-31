@@ -55,6 +55,11 @@ def catalog_table(monkeypatch):
                 "fetched_at": "2026-07-10T12:00:00+00:00",
             }
         )
+        # Phase 4's alerts Lambda writes dedupe items into this same table
+        # (sk = ALERT#<rise> / DIGEST#<rise>); the catalog scan must ignore
+        # them rather than trip over their missing line1/line2/name/fetched_at.
+        table.put_item(Item={"pk": "25544", "sk": "ALERT#2026-07-30T01:07:36Z"})
+        table.put_item(Item={"pk": "25544", "sk": "DIGEST#2026-07-30T01:07:35Z"})
         yield table
 
 
