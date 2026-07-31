@@ -314,22 +314,29 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     `tofu_version` pinning philosophy) against `opentofu/` before anything
     else. Accepted-risk findings live in `.checkov.yaml` (repo-wide) and
     inline `checkov:skip` comments (resource-specific) — see DESIGN.md's
-    "Security scanning in CI" section for the full triage and two gotchas
+    "Security scanning in CI" section for the full triage and gotchas
     worth knowing before touching either: (1) inline skip comments only
     work *inside* the resource block, not on the line before it; (2)
     enabling this surfaced a real gap, not just scanner noise — HTTP API
     access logging needed a `aws_cloudwatch_log_resource_policy` that
-    nothing had required before. Also added while the IAM policies were
-    open: AWS-managed-key encryption for DynamoDB/S3/SNS, DynamoDB PITR,
-    a CloudFront managed security-headers policy, and a 90-day lifecycle
-    on the TLE archive bucket — all free wins with zero blast radius. This
-    round also touched `sattrack-gha-read`/`sattrack-gha-write` in
-    `cicd_oidc.tf` to grant the new actions these resources need
+    nothing had required before; (3) the first real `apply.yml` run of
+    this batch failed — the CloudFront security-headers policy started as
+    a `data "aws_cloudfront_response_headers_policy"` name lookup, but
+    OpenTofu reads data sources before applying that same run's IAM
+    policy changes, so `gha_apply` AccessDenied'd on a permission it was
+    simultaneously being granted. Fixed by hardcoding the (globally
+    constant) managed-policy ID as a local instead of looking it up —
+    `CKV2_AWS_32` inline-skipped as a result, since that graph check can't
+    recognize a literal ID as "attached." Also added while the IAM
+    policies were open: AWS-managed-key encryption for DynamoDB/S3/SNS,
+    DynamoDB PITR, and a 90-day lifecycle on the TLE archive bucket — all
+    free wins with zero blast radius. This round also touched
+    `sattrack-gha-read`/`sattrack-gha-write` in `cicd_oidc.tf` to grant
+    the new actions these resources need
     (`s3:PutLifecycleConfiguration`, `dynamodb:UpdateContinuousBackups`,
     `logs:PutResourcePolicy`/`DescribeResourcePolicies`, the new
-    `/aws/apigateway/sattrack-*` log-group ARN pattern,
-    `cloudfront:GetResponseHeadersPolicy`) — same "grow the policy in the
-    same PR" discipline as everything else in that file.
+    `/aws/apigateway/sattrack-*` log-group ARN pattern) — same "grow the
+    policy in the same PR" discipline as everything else in that file.
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,

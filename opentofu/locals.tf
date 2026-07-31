@@ -40,4 +40,15 @@ locals {
   # name is strictly tighter: a rename or a delete-and-recreate under the
   # same name can't produce a token that matches an old policy.
   github_oidc_sub_prefix = "repo:MacGotHub@188585672/satellite-tracker@1305326446"
+
+  # AWS-managed CloudFront response headers policy (HSTS,
+  # X-Content-Type-Options, X-Frame-Options, Referrer-Policy) —
+  # "Managed-SecurityHeadersPolicy". Hardcoded rather than looked up via a
+  # data source: the ID is a global AWS constant, identical in every
+  # account/region, since it's an AWS-owned resource, not a customer one.
+  # A live lookup also can't work in gha_apply anyway — data sources are
+  # read before the same apply's own IAM policy changes take effect, so a
+  # first-ever apply granting the read permission would AccessDenied on
+  # itself (confirmed the hard way).
+  cloudfront_managed_security_headers_policy_id = "67f7725c-6f97-4210-82d7-5512b31e9d03"
 }

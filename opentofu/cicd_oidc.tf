@@ -240,15 +240,9 @@ resource "aws_iam_policy" "gha_read" {
       {
         # CloudFront has no resource-level IAM support for these actions —
         # AWS requires Resource "*" regardless of which distribution.
-        Sid    = "CloudFrontRead"
-        Effect = "Allow"
-        Action = [
-          "cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:ListTagsForResource",
-          "cloudfront:GetCachePolicy", "cloudfront:GetOriginAccessControl",
-          # The response-headers policy is an AWS-managed one looked up by
-          # name (data source) — read-only, but needed at plan time too.
-          "cloudfront:GetResponseHeadersPolicy", "cloudfront:ListResponseHeadersPolicies",
-        ]
+        Sid      = "CloudFrontRead"
+        Effect   = "Allow"
+        Action   = ["cloudfront:GetDistribution", "cloudfront:GetDistributionConfig", "cloudfront:ListTagsForResource", "cloudfront:GetCachePolicy", "cloudfront:GetOriginAccessControl"]
         Resource = "*"
       },
     ]

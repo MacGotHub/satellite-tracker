@@ -347,6 +347,29 @@ from. No free path exists for that one; it's in the accepted-risk skip
 list with the real (if lesser) improvement — AWS-managed-key
 `server_side_encryption` — still applied in `main.tf`.
 
+**Gotcha (the real one this round — first `apply.yml` run failed on it):**
+the CloudFront security-headers policy started as
+`data "aws_cloudfront_response_headers_policy" "security_headers" { name =
+"Managed-SecurityHeadersPolicy" }`, looked up at plan/apply time. Worked
+fine locally (Derek's own AWS user already has broad permissions) but
+failed in CI: `gha_apply`'s AccessDenied on
+`cloudfront:ListResponseHeadersPolicies` — because OpenTofu reads data
+sources *before* applying that same run's resource changes, so a first-
+ever apply granting the read permission can't use it until a second run.
+Fixed by hardcoding the policy ID directly as a local
+(`cloudfront_managed_security_headers_policy_id` in `locals.tf`) instead
+of looking it up — these AWS-managed policy IDs are global constants,
+identical in every account, so a live lookup was never actually buying
+anything. Traded one Checkov finding for it: `CKV2_AWS_32` is a graph
+check that only recognizes a connection to a
+`response_headers_policy`/`data.aws_cloudfront_response_headers_policy`
+resource, so a literal ID (functionally identical) is invisible to it —
+inline-skipped on `aws_cloudfront_distribution.frontend` with the full
+reasoning in the comment. General lesson: a data source that only a
+*new* permission grant can satisfy is never safe inside the same apply
+that grants it — hardcode the value if it's a stable constant, or split
+into two applies if it isn't.
+
 ---
 
 ## Build Order and Dependencies

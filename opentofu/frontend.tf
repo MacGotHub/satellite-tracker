@@ -77,12 +77,6 @@ resource "aws_s3_object" "frontend_config" {
   EOT
 }
 
-# AWS-managed policy (HSTS, X-Content-Type-Options, X-Frame-Options,
-# Referrer-Policy) — no custom rules needed, and it's free.
-data "aws_cloudfront_response_headers_policy" "security_headers" {
-  name = "Managed-SecurityHeadersPolicy"
-}
-
 resource "aws_cloudfront_origin_access_control" "frontend" {
   name                              = "${local.name_prefix}-frontend"
   origin_access_control_origin_type = "s3"
@@ -115,6 +109,13 @@ resource "aws_cloudfront_cache_policy" "frontend" {
 }
 
 resource "aws_cloudfront_distribution" "frontend" {
+  # checkov:skip=CKV2_AWS_32: response_headers_policy_id below is set to
+  #   the real Managed-SecurityHeadersPolicy ID (see locals.tf) — this
+  #   check just can't see it because it only recognizes a graph
+  #   connection to a response_headers_policy resource/data source, not a
+  #   literal ID. A data-source lookup was tried first and reverted: it
+  #   breaks CI's own bootstrapping, since gha_apply's data-source reads
+  #   happen before that same apply's IAM policy grant takes effect.
   # checkov:skip=CKV_AWS_86: access logging needs a dedicated log bucket
   #   (plus its own lifecycle/encryption) for a personal static site — not
   #   worth the added bucket and cost.
@@ -149,7 +150,7 @@ resource "aws_cloudfront_distribution" "frontend" {
     allowed_methods            = ["GET", "HEAD"]
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.frontend.id
-    response_headers_policy_id = data.aws_cloudfront_response_headers_policy.security_headers.id
+    response_headers_policy_id = local.cloudfront_managed_security_headers_policy_id
     compress                   = true
   }
 
