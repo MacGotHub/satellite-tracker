@@ -53,6 +53,7 @@ def catalog_table(monkeypatch):
                 "line1": line1,
                 "line2": line2,
                 "fetched_at": "2026-07-10T12:00:00+00:00",
+                "group": "stations",
             }
         )
         # Phase 4's alerts Lambda writes dedupe items into this same table
@@ -117,8 +118,30 @@ def test_list_satellites(catalog_table):
             "tle_fetched_at": "2026-07-10T12:00:00+00:00",
             "line1": ISS_TLE[1],
             "line2": ISS_TLE[2],
+            "group": "stations",
         }
     ]
+
+
+def test_list_satellites_defaults_group_for_untagged_items(catalog_table):
+    # Items written before Phase 6 Step 3 added group-tagging won't have
+    # the attribute until their next 2h refresh — must not KeyError.
+    catalog_table.put_item(
+        Item={
+            "pk": "48274",
+            "sk": "TLE",
+            "name": "CSS (TIANHE)",
+            "line1": "1 48274U 21035A   26191.50000000  .00025000  00000-0  25000-3 0  9005",
+            "line2": "2 48274  41.4750  10.0000 0001000 100.0000 260.0000 15.60000000123456",
+            "fetched_at": "2026-07-10T12:00:00+00:00",
+        }
+    )
+
+    response = api_handler.handler({"routeKey": "GET /satellites"}, None)
+
+    body = json.loads(response["body"])
+    untagged = next(s for s in body["satellites"] if s["id"] == "48274")
+    assert untagged["group"] == "stations"
 
 
 def test_position_route_returns_live_subpoint(catalog_table):
@@ -136,13 +159,12 @@ def test_position_route_returns_live_subpoint(catalog_table):
     assert -52 <= body["lat"] <= 52
 
 
-def test_all_positions_route(catalog_table):
+def test_positions_route_retired(catalog_table):
+    # GET /positions was retired in Phase 6 Step 3 — no consumers left,
+    # and it would have Skyfield-propagated the whole catalog per request.
     response = api_handler.handler({"routeKey": "GET /positions"}, None)
 
-    body = json.loads(response["body"])
-    assert response["statusCode"] == 200
-    assert len(body["positions"]) == 1
-    assert body["positions"][0]["id"] == "25544"
+    assert response["statusCode"] == 404
 
 
 def test_unknown_satellite_404(catalog_table):

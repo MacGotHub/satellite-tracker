@@ -72,7 +72,11 @@ resource "aws_lambda_function" "api" {
   role             = aws_iam_role.api.arn
   handler          = "api.handler.handler"
   runtime          = "python3.12"
-  timeout          = 15
+  # 15s -> 30s: safety margin for _list_satellites's Scan+serialize now
+  # that Phase 6 Step 3 added Starlink (~10,800 items) to the catalog —
+  # not evidence 15s actually failed, GET /positions (the Skyfield-heavy
+  # route this would have really strained) was retired in the same step.
+  timeout          = 30
   memory_size      = 512 # numpy import + pass search want headroom; 128 MB is painfully slow
   filename         = data.archive_file.api.output_path
   source_code_hash = data.archive_file.api.output_base64sha256

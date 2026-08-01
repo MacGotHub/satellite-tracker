@@ -14,11 +14,13 @@ locals {
 
   # HTTP API routes, all handled by the single position-API Lambda.
   # A map (not separate resource blocks) so adding a route in Phase 3/4 is
-  # a one-line change here.
+  # a one-line change here. GET /positions was retired in Phase 6 Step 3 —
+  # the frontend moved to client-side propagation in Steps 1-2, leaving it
+  # with no consumers, and it would have Skyfield-propagated the entire
+  # catalog (including Starlink-scale groups) on every request.
   api_routes = toset([
     "GET /satellites",
     "GET /satellites/{id}/position",
-    "GET /positions",
     "GET /satellites/{id}/passes",
   ])
 
