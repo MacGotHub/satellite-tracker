@@ -115,6 +115,8 @@ def test_list_satellites(catalog_table):
             "id": "25544",
             "name": "ISS (ZARYA)",
             "tle_fetched_at": "2026-07-10T12:00:00+00:00",
+            "line1": ISS_TLE[1],
+            "line2": ISS_TLE[2],
         }
     ]
 

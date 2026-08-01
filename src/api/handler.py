@@ -91,7 +91,13 @@ def _response(status: int, body) -> dict:
 
 def _list_satellites(event) -> dict:
     satellites = [
-        {"id": item["pk"], "name": item["name"], "tle_fetched_at": item["fetched_at"]}
+        {
+            "id": item["pk"],
+            "name": item["name"],
+            "tle_fetched_at": item["fetched_at"],
+            "line1": item["line1"],
+            "line2": item["line2"],
+        }
         for item in _scan_catalog()
     ]
     satellites.sort(key=lambda s: s["name"])
