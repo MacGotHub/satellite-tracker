@@ -20,3 +20,8 @@ src/layers/skyfield/dist/
 
 # Deploy-time inputs (Cesium ion token) — never committed
 *.auto.tfvars
+
+# Generated at deploy time by OpenTofu (API URL + Cesium ion token) —
+# never committed. Not previously listed here since no one had created a
+# local copy before; added while testing the frontend against the live API.
+frontend/config.js

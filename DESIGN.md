@@ -707,6 +707,39 @@ server-side version by default.
 5. Retire the three superseded routes and the Skyfield layer dependency
    from `api/handler.py`.
 
+**Steps 1-2 — implemented and verified 2026-08-01** (not yet deployed at
+verification time; the `line1`/`line2` addition to `GET /satellites` was
+pushed ahead of the frontend rewrite so parity could be checked against
+real live data). As-built notes:
+
+- **satellite.js v7.1.0**, loaded via jsDelivr's `+esm` CDN endpoint
+  (the package is ESM-only as of v7 — no UMD/global bundle exists
+  anymore). This required converting `app.js`'s own script tag to
+  `type="module"` — verified safe since `config.js` (classic script,
+  sets `window.SATTRACK_CONFIG`) always runs before a deferred module
+  script regardless of source order.
+- `viewer.clock.shouldAnimate = true` is required for the per-frame
+  `onTick` render loop to actually advance — the animation/timeline
+  widgets are disabled in this app's Viewer config, and without this
+  flag the clock silently never ticks forward, so satellites render
+  once and then never move. First thing to check if a future edit
+  breaks motion again.
+- **Parity verified** via a temporary console-comparison against the
+  live `/positions` route (satellite.js vs. server Skyfield, same
+  instant, all 23 tracked satellites): position deltas landed within
+  ~0.02° lat/lon (roughly 1-3 km) and ~50 m altitude — consistent with
+  DESIGN.md's own documented "two SGP4 engines can differ slightly"
+  caveat, not a bug. Motion was independently confirmed by reading the
+  same satellite's computed position twice ~105 s apart and observing a
+  real, physically-consistent shift.
+- Local pass finder (`findPassesLocal`) verified against a manually
+  entered observer: produced a chronologically ordered list of passes
+  with plausible period spacing (~97 min apart, matching the selected
+  satellite's actual orbital period) and sane elevation/azimuth ranges.
+  `localStorage` persistence of the manual/Geolocation observer
+  confirmed across a page reload.
+- No JS console errors during any of the above.
+
 **Portfolio framing:** "Moved orbit propagation client-side (satellite.js)
 to support arbitrary observer locations and scale to ~10k objects on
 CloudFront-cached, observer-independent data instead of added backend

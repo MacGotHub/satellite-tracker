@@ -64,6 +64,37 @@ html, body, #globe {
 
 #passes h3 { margin: 14px 0 4px; font-size: 0.9rem; }
 #passes-hint { color: #8fa3b8; font-size: 0.75rem; margin: 0 0 8px; }
+
+#obs-active { font-size: 0.75rem; color: #9fd8ff; margin: 0 0 8px; }
+
+#obs-manual {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+#obs-manual input {
+  width: 0; /* let flexbox size these evenly regardless of intrinsic width */
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #2d4a66;
+  border-radius: 6px;
+  background: rgba(12, 20, 32, 0.88);
+  color: #e8f1fa;
+  font-size: 0.8rem;
+}
+#obs-manual input::placeholder { color: #8fa3b8; }
+#obs-manual button {
+  padding: 6px 10px;
+  border: 1px solid #2d4a66;
+  border-radius: 6px;
+  background: #17324d;
+  color: #cfe8ff;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#obs-manual button:hover { background: #1d4066; }
+
 #passes-load {
   width: 100%;
   padding: 6px;
@@ -77,5 +108,3 @@ html, body, #globe {
 
 #passes-list { margin: 8px 0 0; padding-left: 18px; }
 #passes-list li { margin-bottom: 8px; line-height: 1.35; }
-#passes-list .visible-yes { color: #7dff9b; font-weight: 600; }
-#passes-list .visible-no { color: #8fa3b8; }

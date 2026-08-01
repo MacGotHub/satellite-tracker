@@ -30,9 +30,21 @@
     </dl>
     <section id="passes">
       <h3>Upcoming passes</h3>
-      <p id="passes-hint">Uses your browser location (never stored) to
-        predict passes over the next 48 h.</p>
-      <button id="passes-load">Predict passes here</button>
+      <p id="passes-hint">Computed in your browser from this satellite's
+        orbit — shows every pass above 10° elevation in the next 48 h.
+        Visibility (day/night) filtering is coming in a later update.</p>
+
+      <p id="obs-active">No observer location set yet.</p>
+
+      <form id="obs-manual">
+        <input id="obs-lat" type="number" step="0.001" min="-90" max="90"
+               placeholder="Latitude" required />
+        <input id="obs-lon" type="number" step="0.001" min="-180" max="180"
+               placeholder="Longitude" required />
+        <button type="submit">Use these coordinates</button>
+      </form>
+
+      <button id="passes-load">Predict passes here (use my location)</button>
       <ol id="passes-list"></ol>
     </section>
   </aside>
@@ -40,6 +52,12 @@
   <!-- config.js is generated at deploy time by OpenTofu (API URL + optional
        Cesium ion token) — it is intentionally not in the repo. -->
   <script src="config.js"></script>
-  <script src="app.js"></script>
+  <!-- type="module" is required, not stylistic — app.js imports satellite.js
+       via a CDN ES module. Classic scripts (config.js above) run
+       synchronously as parsed; module scripts always defer until after the
+       document is parsed, so window.SATTRACK_CONFIG is guaranteed to exist
+       before this module body runs. Don't "simplify" this back to a plain
+       script tag. -->
+  <script type="module" src="app.js"></script>
 </body>
 </html>
