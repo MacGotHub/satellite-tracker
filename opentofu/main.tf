@@ -186,12 +186,18 @@ resource "aws_iam_role_policy" "tle_fetcher" {
 # -----------------------------------------------
 
 resource "aws_lambda_function" "tle_fetcher" {
-  function_name    = "sattrack-tle-fetcher"
-  role             = aws_iam_role.tle_fetcher.arn
-  handler          = "handler.handler"
-  runtime          = "python3.12"
-  timeout          = 30
-  memory_size      = 128
+  function_name = "sattrack-tle-fetcher"
+  role          = aws_iam_role.tle_fetcher.arn
+  handler       = "handler.handler"
+  runtime       = "python3.12"
+  # Phase 6 Step 3 added "starlink" (~10,800 satellites) alongside
+  # "stations". batch_writer() chunks into groups of 25, so that's ~430
+  # sequential write calls — plausibly 10-45s alone, on top of a larger
+  # HTTP fetch/S3 archive and now two groups instead of one. 120s is real
+  # margin (Lambda bills actual duration, not the ceiling); the memory
+  # bump gives the batching/JSON work a bit more CPU share.
+  timeout          = 120
+  memory_size      = 256
   filename         = data.archive_file.tle_fetcher.output_path
   source_code_hash = data.archive_file.tle_fetcher.output_base64sha256
 
@@ -199,7 +205,7 @@ resource "aws_lambda_function" "tle_fetcher" {
     variables = {
       TABLE_NAME      = aws_dynamodb_table.sattrack.name
       BUCKET_NAME     = aws_s3_bucket.tle_archive.bucket
-      CELESTRAK_GROUP = "stations"
+      CELESTRAK_GROUP = "stations,starlink"
     }
   }
 

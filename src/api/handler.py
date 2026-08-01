@@ -1,9 +1,13 @@
 """Position/pass API Lambda — the read side of the satellite tracker.
 
-Serves four HTTP API routes from the TLE catalog that the Phase 1 pipeline
-keeps fresh in DynamoDB. Positions are propagated from the stored TLE at
-request time rather than precomputed — an exact answer for "now" is cheap,
-and only the TLE itself needs refreshing (on the Phase 1 schedule).
+Serves three HTTP API routes from the TLE catalog that the Phase 1 pipeline
+keeps fresh in DynamoDB. `GET /positions` (bulk server-computed positions)
+was retired in Phase 6, Step 3: the frontend moved to client-side
+propagation in Steps 1-2, so it had no consumers left, and it would have
+tried to Skyfield-propagate the entire catalog — including Starlink-scale
+groups — on every request. `GET /satellites/{id}/position` and
+`GET /satellites/{id}/passes` are per-item lookups, unaffected by catalog
+size, and stay.
 
 Skyfield, numpy, and the de421 ephemeris arrive via the Lambda layer
 (/opt/python and /opt/data); only this handler and shared/ live in the
@@ -97,6 +101,9 @@ def _list_satellites(event) -> dict:
             "tle_fetched_at": item["fetched_at"],
             "line1": item["line1"],
             "line2": item["line2"],
+            # Default covers items written before Phase 6 Step 3 tagged
+            # them by source group — self-heals on their next 2h refresh.
+            "group": item.get("group", "stations"),
         }
         for item in _scan_catalog()
     ]
@@ -120,18 +127,6 @@ def _one_position(event) -> dict:
             **subpoint_of(satellite, now),
         },
     )
-
-
-def _all_positions(event) -> dict:
-    now = _timescale().now()
-    positions = []
-    for item in _scan_catalog():
-        satellite = _satellite_from_item(item)
-        positions.append(
-            {"id": item["pk"], "name": item["name"], **subpoint_of(satellite, now)}
-        )
-    positions.sort(key=lambda p: p["name"])
-    return _response(200, {"time": now.utc_iso(), "positions": positions})
 
 
 def _passes(event) -> dict:
@@ -181,7 +176,6 @@ def _passes(event) -> dict:
 ROUTES = {
     "GET /satellites": _list_satellites,
     "GET /satellites/{id}/position": _one_position,
-    "GET /positions": _all_positions,
     "GET /satellites/{id}/passes": _passes,
 }
 

@@ -37,7 +37,7 @@ def archive_raw_tle(s3_client, bucket_name, group, raw_text, fetched_at):
     return key
 
 
-def write_satellites(table, satellites, fetched_at):
+def write_satellites(table, satellites, fetched_at, group):
     with table.batch_writer() as batch:
         for sat in satellites:
             batch.put_item(
@@ -48,36 +48,49 @@ def write_satellites(table, satellites, fetched_at):
                     "line1": sat["line1"],
                     "line2": sat["line2"],
                     "fetched_at": fetched_at,
+                    "group": group,
                 }
             )
 
 
 def handler(event, context):
-    group = os.environ.get("CELESTRAK_GROUP", "stations")
+    # Comma-separated, matching alerts.tf's WATCHLIST convention for
+    # multi-value env config elsewhere in this project.
+    groups = [g.strip() for g in os.environ.get("CELESTRAK_GROUP", "stations").split(",") if g.strip()]
     table_name = os.environ["TABLE_NAME"]
     bucket_name = os.environ["BUCKET_NAME"]
 
     dynamodb = boto3.resource("dynamodb")
     s3_client = boto3.client("s3")
+    table = dynamodb.Table(table_name)
 
     fetched_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    url = CELESTRAK_URL_TEMPLATE.format(group=group)
-    raw_text = fetch_tle_text(url)
-    satellites = parse_tle(raw_text)
 
-    if not satellites:
-        raise ValueError(f"CelesTrak returned no TLEs for group '{group}'")
+    per_group = {}
+    archive_keys = {}
+    for group in groups:
+        url = CELESTRAK_URL_TEMPLATE.format(group=group)
+        raw_text = fetch_tle_text(url)
+        satellites = parse_tle(raw_text)
 
-    archive_key = archive_raw_tle(s3_client, bucket_name, group, raw_text, fetched_at)
-    write_satellites(dynamodb.Table(table_name), satellites, fetched_at)
+        if not satellites:
+            raise ValueError(f"CelesTrak returned no TLEs for group '{group}'")
+
+        # Archive and write per group, immediately — if a later group's
+        # fetch fails, earlier groups' data has already landed rather
+        # than being discarded by a single merged write at the end.
+        archive_keys[group] = archive_raw_tle(s3_client, bucket_name, group, raw_text, fetched_at)
+        write_satellites(table, satellites, fetched_at, group)
+        per_group[group] = len(satellites)
 
     return {
         "statusCode": 200,
         "body": json.dumps(
             {
-                "group": group,
-                "satellite_count": len(satellites),
-                "archive_key": archive_key,
+                "groups": groups,
+                "satellite_count": sum(per_group.values()),
+                "per_group": per_group,
+                "archive_keys": archive_keys,
                 "fetched_at": fetched_at,
             }
         ),
