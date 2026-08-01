@@ -82,8 +82,17 @@ function entityFor(sat) {
 
 /* ---------- TLE catalog (slow refresh) ---------- */
 
-const catalog = new Map(); // id -> { id, name, satrec }
+const catalog = new Map(); // id -> { id, name, satrec } — named, interactive
 let finderPopulated = false;
+
+// Starlink-scale bulk group — visual only (see bulk swarm section below).
+// A plain array + parallel PointPrimitive map, not the Entity API: no
+// name lookup is needed per-point, so no reason to pay Entity overhead
+// for ~10,000+ objects.
+const bulkCatalog = []; // [{ id, satrec }]
+const bulkPoints = new Map(); // id -> PointPrimitive
+const bulkPointCollection = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
+let bulkCursor = 0; // rolling index into bulkCatalog, advanced in onTick below
 
 async function refreshCatalog() {
   try {
@@ -92,16 +101,43 @@ async function refreshCatalog() {
     const body = await response.json();
 
     catalog.clear();
+    bulkCatalog.length = 0;
+    bulkPointCollection.removeAll();
+    bulkPoints.clear();
+    bulkCursor = 0;
+
     for (const sat of body.satellites) {
       try {
         const satrec = satellite.twoline2satrec(sat.line1, sat.line2);
-        catalog.set(sat.id, { id: sat.id, name: sat.name, satrec });
+        if (sat.group === "starlink") {
+          bulkCatalog.push({ id: sat.id, satrec });
+        } else {
+          catalog.set(sat.id, { id: sat.id, name: sat.name, satrec });
+        }
       } catch (err) {
-        // One bad TLE shouldn't blank the whole globe.
+        // One bad TLE shouldn't blank the whole globe. Starlink's
+        // constant launch/deorbit churn exercises this far more than
+        // the small, stable stations set ever did.
         console.warn(`skipping ${sat.name}: TLE parse failed`, err);
       }
     }
-    statusEl.textContent = `${catalog.size} satellites tracked · TLEs updated ${new Date().toLocaleTimeString()}`;
+
+    // Real positions land over the next ~1s as the amortized onTick
+    // loop below cycles through the full bulk list — a brief
+    // "materializing" effect after each refresh, not worth avoiding.
+    for (const sat of bulkCatalog) {
+      bulkPoints.set(
+        sat.id,
+        bulkPointCollection.add({
+          position: Cesium.Cartesian3.ZERO,
+          color: Cesium.Color.LIGHTSKYBLUE.withAlpha(0.6),
+          pixelSize: 2,
+          id: sat.id,
+        })
+      );
+    }
+
+    statusEl.textContent = `${catalog.size} satellites tracked, ${bulkCatalog.length} in swarm · TLEs updated ${new Date().toLocaleTimeString()}`;
     populateFinder();
   } catch (err) {
     // Keep whatever catalog we already have — stale-but-working beats
@@ -114,6 +150,16 @@ async function refreshCatalog() {
 
 const currentPositions = new Map(); // id -> { lat, lon, alt_km }
 let lastPanelUpdateMs = 0;
+
+// Naive per-frame propagation of ~10,769 bulk satellites would be
+// roughly 648,000 SGP4 calls/second — well past a 60fps frame budget,
+// before Cesium does any rendering work. Amortize instead: each tick
+// advances a rolling cursor through a fixed-size slice of bulkCatalog,
+// so the full set cycles through roughly once a second (self-adjusting
+// to actual frame rate on slower hardware) with no single-frame stutter
+// — a once-a-second full-batch update was tried first and rejected for
+// exactly that stutter.
+const BULK_SLICE_SIZE = 180; // ~10,769 / 60fps ≈ one full cycle per ~1s
 
 viewer.clock.onTick.addEventListener((clock) => {
   const now = Cesium.JulianDate.toDate(clock.currentTime);
@@ -132,8 +178,29 @@ viewer.clock.onTick.addEventListener((clock) => {
     entityFor(sat).position = Cesium.Cartesian3.fromDegrees(lon, lat, altKm * 1000);
   }
 
-  // Entities update every frame for smooth motion; the text panel doesn't
-  // need to redraw 60x/sec for numbers that only usefully change ~1x/sec.
+  if (bulkCatalog.length > 0) {
+    const sliceEnd = Math.min(bulkCursor + BULK_SLICE_SIZE, bulkCatalog.length);
+    for (let i = bulkCursor; i < sliceEnd; i++) {
+      const sat = bulkCatalog[i];
+      const posVel = satellite.propagate(sat.satrec, now);
+      if (!posVel.position) continue;
+
+      const geo = satellite.eciToGeodetic(posVel.position, gmst);
+      const point = bulkPoints.get(sat.id);
+      if (point) {
+        point.position = Cesium.Cartesian3.fromDegrees(
+          satellite.degreesLong(geo.longitude),
+          satellite.degreesLat(geo.latitude),
+          geo.height * 1000
+        );
+      }
+    }
+    bulkCursor = sliceEnd >= bulkCatalog.length ? 0 : sliceEnd;
+  }
+
+  // Entities/points update every frame (or every amortized slice) for
+  // smooth motion; the text panel doesn't need to redraw 60x/sec for
+  // numbers that only usefully change ~1x/sec.
   const nowMs = Date.now();
   if (nowMs - lastPanelUpdateMs >= PANEL_THROTTLE_MS) {
     refreshPanel();

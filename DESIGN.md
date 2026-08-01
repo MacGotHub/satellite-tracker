@@ -740,6 +740,66 @@ real live data). As-built notes:
   confirmed across a page reload.
 - No JS console errors during any of the above.
 
+**Step 3 — implemented and verified 2026-08-01, live.** Widened the
+tracked catalog to include CelesTrak's `starlink` group — **10,769**
+satellites as of the live fetch that landed this (constellation size
+moves; treat that as a snapshot, not a constant). Backend deployed via
+PR + `plan.yml` rather than a direct push to `main`, since `tofu` was
+locally blocked by an Application Control/endpoint-security policy for
+this session — CI's real plan output stood in for the local check.
+As-built notes:
+
+- `GET /positions` retired (see the roadmap-interaction note above) —
+  confirmed returning 404 live. `GET /satellites` measured at **2.97 MB**
+  for all 10,792 satellites (23 stations + 10,769 starlink), comfortably
+  under Lambda's 6 MB response limit but a shrinking margin as Starlink
+  grows — worth revisiting if/when more groups are added (item 13).
+- `tle_fetcher`'s real run (both groups, one invocation) measured
+  **20.3 s** billed duration against the new 120 s timeout budget, using
+  113 MB of the new 256 MB allocation — real headroom on both axes, the
+  30-45 s estimate that sized the timeout was conservative.
+- Each catalog item is tagged with its source `group`
+  (`stations`/`starlink`) at ingest time, exposed via `GET /satellites` —
+  the frontend splits rendering treatment by this field rather than
+  guessing from the name.
+- Bulk rendering: a separate `Cesium.PointPrimitiveCollection` (not the
+  Entity API) for the ~10,769 Starlink points, no labels, not
+  individually selectable — by design, confirmed with you before
+  building. Propagation is amortized across an `onTick`-driven rolling
+  slice (~180 satellites/tick) rather than a once-a-second full batch,
+  to avoid a periodic stutter. The existing ~23-satellite stations group
+  (Entity API, full interactivity — click, panel, pass prediction) is
+  untouched code, confirmed zero regression.
+- Confirmed clean: zero console warnings/errors across all 10,792 real
+  TLEs — `twoline2satrec`'s try/catch never triggered despite Starlink's
+  continuous launch/deorbit churn, at least on this fetch.
+
+**Gotcha (cost a real amount of debugging time): Chrome throttles
+`requestAnimationFrame` almost to a halt for backgrounded/hidden tabs —
+this looks identical to a severe rendering-performance bug and isn't
+one.** Verifying this step's frame rate via the `claude-in-chrome`
+automation tooling produced alarming readings (sub-1 FPS, multi-second
+frame times) that led down a wrong path — briefly "fixing" things that
+were never actually broken (removing point transparency, capping the
+bulk count) before the real cause surfaced: `document.hidden` was `true`
+and `document.visibilityState` was `"hidden"` for the automated tab, and
+even a `requestAnimationFrame`-based frame counter never received a
+single callback within a 45-second window, while a plain `fetch()` on
+the same tab returned instantly. Cesium's own render loop (and
+`clock.onTick`) rides the same throttled callback, so *any* Cesium app
+would show this exact symptom in a backgrounded automated tab, entirely
+independent of point count, transparency, or update frequency — none of
+which were ever the problem. Confirmed the original design (translucent
+color, full 10,769 points, amortized updates) was correct all along by
+reverting the diagnostic changes and re-verifying: renders correctly,
+zero errors, motion and interactivity all check out. **What this means
+for future verification**: real sustained frame-rate/smoothness claims
+can't be trusted from this automation path — screenshots and short
+console checks are fine (they don't depend on a live render loop), but
+don't chase FPS numbers from a tab you can't confirm is foregrounded.
+Recommend a quick manual look in an actual foreground browser as the
+real check for anything performance-sensitive going forward.
+
 **Portfolio framing:** "Moved orbit propagation client-side (satellite.js)
 to support arbitrary observer locations and scale to ~10k objects on
 CloudFront-cached, observer-independent data instead of added backend
