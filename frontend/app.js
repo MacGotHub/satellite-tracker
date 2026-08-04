@@ -85,6 +85,12 @@ function entityFor(sat) {
 const catalog = new Map(); // id -> { id, name, satrec } — named, interactive
 let finderPopulated = false;
 
+// A satellite that can't propagate at one instant usually can't propagate
+// at any nearby instant either, so this would otherwise re-fire every tick
+// (60x/sec) for as long as that condition holds. Warn once per satellite
+// per catalog refresh instead of flooding the console forever.
+const warnedCatalogSkips = new Set();
+
 // Starlink-scale bulk group — visual only (see bulk swarm section below).
 // A plain array + parallel PointPrimitive map, not the Entity API: no
 // name lookup is needed per-point, so no reason to pay Entity overhead
@@ -101,6 +107,7 @@ async function refreshCatalog() {
     const body = await response.json();
 
     catalog.clear();
+    warnedCatalogSkips.clear();
     bulkCatalog.length = 0;
     bulkPointCollection.removeAll();
     bulkPoints.clear();
@@ -109,6 +116,13 @@ async function refreshCatalog() {
     for (const sat of body.satellites) {
       try {
         const satrec = satellite.twoline2satrec(sat.line1, sat.line2);
+        // twoline2satrec doesn't throw on a bad element set — it sets
+        // satrec.error instead (out-of-range eccentricity, etc.). Catch
+        // it here, at load time, so a dead-on-arrival satrec never enters
+        // the render set and gets re-tried every propagation cycle.
+        if (satrec.error) {
+          throw new Error(`sgp4init error code ${satrec.error}`);
+        }
         if (sat.group === "starlink") {
           bulkCatalog.push({ id: sat.id, satrec });
         } else {
@@ -161,13 +175,43 @@ let lastPanelUpdateMs = 0;
 // exactly that stutter.
 const BULK_SLICE_SIZE = 180; // ~10,769 / 60fps ≈ one full cycle per ~1s
 
+// satellite.propagate() returns { position: false, velocity: false } on a
+// hard SGP4 failure (decayed orbit, etc.) — but a small fraction of edge-case
+// orbital elements make SGP4 "succeed" while returning NaN-filled ECI
+// components instead of tripping that flag. A truthy-but-NaN position slips
+// past a plain `!posVel.position` check, and a NaN Cartesian3 fed into
+// Cesium's PointPrimitiveCollection crashes its internal bounding-volume
+// math with an unrelated-looking "Cannot read properties of null" error —
+// this is what actually broke the swarm render. Check finiteness, not just
+// truthiness.
+function hasValidPosition(posVel) {
+  // propagate() itself can come back null (not just { position: false })
+  // for some satrecs — confirmed live against the full Starlink swarm,
+  // not just a theoretical case. Guard posVel before touching .position.
+  const p = posVel && posVel.position;
+  return (
+    !!p &&
+    Number.isFinite(p.x) &&
+    Number.isFinite(p.y) &&
+    Number.isFinite(p.z)
+  );
+}
+
+let bulkSkippedThisCycle = 0;
+
 viewer.clock.onTick.addEventListener((clock) => {
   const now = Cesium.JulianDate.toDate(clock.currentTime);
   const gmst = satellite.gstime(now);
 
   for (const sat of catalog.values()) {
     const posVel = satellite.propagate(sat.satrec, now);
-    if (!posVel.position) continue; // decayed orbit / propagation error
+    if (!hasValidPosition(posVel)) {
+      if (!warnedCatalogSkips.has(sat.id)) {
+        console.warn(`skipping ${sat.name}: no valid propagated position`);
+        warnedCatalogSkips.add(sat.id);
+      }
+      continue;
+    }
 
     const geo = satellite.eciToGeodetic(posVel.position, gmst);
     const lat = satellite.degreesLat(geo.latitude);
@@ -183,7 +227,10 @@ viewer.clock.onTick.addEventListener((clock) => {
     for (let i = bulkCursor; i < sliceEnd; i++) {
       const sat = bulkCatalog[i];
       const posVel = satellite.propagate(sat.satrec, now);
-      if (!posVel.position) continue;
+      if (!hasValidPosition(posVel)) {
+        bulkSkippedThisCycle++;
+        continue;
+      }
 
       const geo = satellite.eciToGeodetic(posVel.position, gmst);
       const point = bulkPoints.get(sat.id);
@@ -195,7 +242,22 @@ viewer.clock.onTick.addEventListener((clock) => {
         );
       }
     }
-    bulkCursor = sliceEnd >= bulkCatalog.length ? 0 : sliceEnd;
+
+    const cycleComplete = sliceEnd >= bulkCatalog.length;
+    if (cycleComplete) {
+      // Log once per ~1s full-swarm cycle, not per skip — at 10k+ objects
+      // a handful of unpropagatable ones (decayed/malformed elements) is
+      // normal SGP4 behavior. A large or growing count instead points at
+      // bad TLE ingestion upstream, not routine propagation noise.
+      if (bulkSkippedThisCycle > 0) {
+        const pct = ((bulkSkippedThisCycle / bulkCatalog.length) * 100).toFixed(1);
+        console.warn(
+          `swarm propagation: skipped ${bulkSkippedThisCycle}/${bulkCatalog.length} objects this cycle (${pct}%)`
+        );
+      }
+      bulkSkippedThisCycle = 0;
+    }
+    bulkCursor = cycleComplete ? 0 : sliceEnd;
   }
 
   // Entities/points update every frame (or every amortized slice) for
@@ -334,7 +396,7 @@ function azimuthToCompass(azimuthDeg) {
 
 function lookAngles(satrec, date, observerGd) {
   const posVel = satellite.propagate(satrec, date);
-  if (!posVel.position) return null;
+  if (!hasValidPosition(posVel)) return null;
   const gmst = satellite.gstime(date);
   const positionEcf = satellite.eciToEcf(posVel.position, gmst);
   const look = satellite.ecfToLookAngles(observerGd, positionEcf);
