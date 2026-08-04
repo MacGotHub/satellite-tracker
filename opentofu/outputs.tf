@@ -12,7 +12,7 @@ output "tle_fetcher_function_name" {
 
 output "api_endpoint" {
   value       = aws_apigatewayv2_api.sattrack.api_endpoint
-  description = "Base URL for the position/pass API (Phase 2)"
+  description = "Base URL for the TLE catalog API (Phase 2; position/pass routes retired in Phase 6 Step 5) — the frontend calls this through CloudFront (Phase 6 Step 4), not directly"
 }
 
 output "globe_url" {

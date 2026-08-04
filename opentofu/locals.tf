@@ -13,15 +13,14 @@ locals {
   }
 
   # HTTP API routes, all handled by the single position-API Lambda.
-  # A map (not separate resource blocks) so adding a route in Phase 3/4 is
-  # a one-line change here. GET /positions was retired in Phase 6 Step 3 —
-  # the frontend moved to client-side propagation in Steps 1-2, leaving it
-  # with no consumers, and it would have Skyfield-propagated the entire
-  # catalog (including Starlink-scale groups) on every request.
+  # A map (not separate resource blocks) so adding a route back is a
+  # one-line change here. GET /positions was retired in Phase 6 Step 3;
+  # GET /satellites/{id}/position and GET /satellites/{id}/passes followed
+  # in Step 5 — the frontend moved all position/pass math to client-side
+  # satellite.js in Steps 1-2, leaving every route but the raw TLE catalog
+  # with no consumers.
   api_routes = toset([
     "GET /satellites",
-    "GET /satellites/{id}/position",
-    "GET /satellites/{id}/passes",
   ])
 
   # Phase 4 — alerting. The knobs Derek is most likely to tune live here,

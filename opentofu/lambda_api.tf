@@ -1,10 +1,11 @@
 # -----------------------------------------------
-# Phase 2 — position/pass API Lambda
+# Phase 2 — position API Lambda
 #
-# Skyfield + numpy + the de421 ephemeris live in a Lambda layer (built by
-# src/layers/skyfield/build.py — run it before plan if dist/ is missing).
-# The function zip carries only the handler and the shared pass logic, so
-# routine code changes don't republish 32 MB of dependencies.
+# Phase 6 Step 5 dropped this Lambda's Skyfield dependency entirely (see
+# the handler's own docstring) — the layer resource stays defined here
+# since it's still built from this phase's original zip, but it's no
+# longer attached to aws_lambda_function.api below. Its only remaining
+# consumer is aws_lambda_function.alerts in alerts.tf.
 # -----------------------------------------------
 
 resource "aws_lambda_layer_version" "skyfield" {
@@ -15,9 +16,10 @@ resource "aws_lambda_layer_version" "skyfield" {
   compatible_runtimes = ["python3.12"]
 }
 
-# Explicit source blocks (not source_dir) so the zip contains exactly the
-# handler and shared/ — and never the layer artifacts or tle_fetch code
-# that also live under src/.
+# Explicit source block (not source_dir) so the zip contains exactly the
+# handler — and never the layer artifacts or tle_fetch/shared code that
+# also live under src/. shared/passes.py dropped in Step 5: this handler
+# no longer imports it (see its docstring).
 data "archive_file" "api" {
   type        = "zip"
   output_path = "${path.module}/build/api.zip"
@@ -25,11 +27,6 @@ data "archive_file" "api" {
   source {
     content  = file("${path.module}/../src/api/handler.py")
     filename = "api/handler.py"
-  }
-
-  source {
-    content  = file("${path.module}/../src/shared/passes.py")
-    filename = "shared/passes.py"
   }
 }
 
@@ -52,7 +49,8 @@ resource "aws_iam_role_policy_attachment" "api_logs" {
 }
 
 # Read-only on the catalog — this Lambda serves data; only the Phase 1
-# fetcher writes it.
+# fetcher writes it. GetItem dropped in Step 5: it only backed the two
+# per-item routes retired in that step, and _list_satellites is Scan-only.
 resource "aws_iam_role_policy" "api" {
   name = "${local.name_prefix}-api-access"
   role = aws_iam_role.api.id
@@ -61,31 +59,33 @@ resource "aws_iam_role_policy" "api" {
     Version = "2012-10-17"
     Statement = [{
       Effect   = "Allow"
-      Action   = ["dynamodb:GetItem", "dynamodb:Scan"]
+      Action   = "dynamodb:Scan"
       Resource = aws_dynamodb_table.sattrack.arn
     }]
   })
 }
 
 resource "aws_lambda_function" "api" {
-  function_name    = "${local.name_prefix}-api"
-  role             = aws_iam_role.api.arn
-  handler          = "api.handler.handler"
-  runtime          = "python3.12"
+  function_name = "${local.name_prefix}-api"
+  role          = aws_iam_role.api.arn
+  handler       = "api.handler.handler"
+  runtime       = "python3.12"
   # 15s -> 30s: safety margin for _list_satellites's Scan+serialize now
   # that Phase 6 Step 3 added Starlink (~10,800 items) to the catalog —
   # not evidence 15s actually failed, GET /positions (the Skyfield-heavy
   # route this would have really strained) was retired in the same step.
-  timeout          = 30
-  memory_size      = 512 # numpy import + pass search want headroom; 128 MB is painfully slow
+  timeout = 30
+  # No longer a numpy/Skyfield import cost as of Step 5 — kept at 512
+  # rather than re-tuned down, since it's Scan+JSON-serialize of the
+  # ~10,800-item catalog (proven to fit the 30s timeout above at this
+  # size) that sizes this now, not import time.
+  memory_size      = 512
   filename         = data.archive_file.api.output_path
   source_code_hash = data.archive_file.api.output_base64sha256
-  layers           = [aws_lambda_layer_version.skyfield.arn]
 
   environment {
     variables = {
-      TABLE_NAME     = aws_dynamodb_table.sattrack.name
-      EPHEMERIS_PATH = "/opt/data/de421.bsp"
+      TABLE_NAME = aws_dynamodb_table.sattrack.name
     }
   }
 
