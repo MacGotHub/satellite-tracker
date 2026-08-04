@@ -807,6 +807,99 @@ compute, while retaining server-side Skyfield propagation for scheduled
 SNS alerts." Server-side vs. client-side compute, with an explicit
 rationale and an explicit carve-out.
 
+**Correction to Step 3's "zero console warnings/errors" claim above:**
+that check was real but incomplete — it covered TLE *parsing*
+(`twoline2satrec`'s try/catch) against one live fetch, not SGP4
+*propagation* at every instant against the full swarm over time. A crash
+surfaced during Step 4 verification (below) that Step 3's testing never
+hit. Documented in full there rather than rewritten here, since it's a
+Step 4-discovered bug, not a Step 3 regression.
+
+**Step 4 — implemented and verified 2026-08-04, live.** `GET /satellites`
+is observer-independent and only changes as often as Phase 1's 2h fetch
+schedule, so every client poll re-scanning DynamoDB for the
+Starlink-scale catalog was pure waste — this step makes caching, not
+client-side compute, pay for that scale (per the caveat earlier in this
+section). As-built notes:
+
+- Added the HTTP API as a second CloudFront origin (`apigw-satellites`)
+  on the *existing* frontend distribution from Phase 3, rather than a
+  separate distribution — one fewer resource, and it makes the frontend's
+  API call same-origin (no CORS preflight) as a free side effect. A
+  dedicated `aws_cloudfront_cache_policy` (1h default / 2h max TTL,
+  bracketing the fetch cadence) is scoped to just the `/satellites` path
+  pattern — deliberately not a wildcard, since the two per-item routes
+  had no frontend callers left to cache for anyway (see Step 5).
+- The frontend's generated `apiBaseUrl` now points at the CloudFront
+  domain instead of the raw execute-api endpoint; the raw endpoint
+  (`api_endpoint` output) still works directly for ad-hoc testing.
+- Verified live: first request to `/satellites` through CloudFront came
+  back `X-Cache: Miss from cloudfront`; a repeat request came back `Hit
+  from cloudfront` with `Age` incrementing — confirmed the Lambda isn't
+  invoked on cache hits, not just that the config looks right.
+- Deployed via PR + `plan.yml`/`apply.yml`, not a local `tofu apply` —
+  local plans this session showed the Lambda layer and `tle_fetcher` zip
+  as changed/replaced purely from Windows-vs-Linux build drift (the same
+  gotcha Phase 5 documented); CI's Linux-built plan came back with
+  exactly the 4 intended resource changes and none of that noise,
+  confirming it really was local-only.
+- **Bug found here, not introduced here:** the Starlink swarm render
+  could crash with `TypeError: Cannot read properties of null (reading
+  'position')`, reproduced live against the real ~10,769-object swarm.
+  Root cause: `satellite.propagate()` can return `null` outright for some
+  satrecs — not just `{ position: false }`, which was the only failure
+  mode Step 3's `if (!posVel.position) continue;` guard checked — and,
+  separately, propagation can "succeed" with NaN-filled ECI components
+  that pass a plain truthiness check but produce a NaN `Cartesian3` that
+  breaks Cesium's internal bounding-volume math the same way. Fixed with
+  a shared `hasValidPosition()` guard (null-check on `posVel` itself,
+  plus `Number.isFinite` on each component) used by both render loops and
+  the local pass-prediction path, plus a `satrec.error` check at
+  TLE-parse time so a dead-on-arrival element set never enters the render
+  set at all. Skip logging is throttled — once per satellite per catalog
+  refresh for the named 23, once per full ~1s cycle for the bulk swarm —
+  since the first version of this fix still logged a persistently-bad
+  object on every tick (60x/sec) before that was caught and fixed too.
+  Re-verified live post-fix: no crash, steady ~2/10,769 (0.02%) skip
+  rate — normal SGP4 edge-case noise per this step's own guardrail, not
+  evidence of bad TLE ingestion.
+
+**Step 5 — implemented and verified 2026-08-04, live.** Retired the two
+routes Steps 1-2 already made redundant and dropped their only
+dependency. As-built notes:
+
+- `GET /satellites/{id}/position` and `GET /satellites/{id}/passes`
+  removed from `local.api_routes` (locals.tf) and from
+  `src/api/handler.py`'s `ROUTES` map — both now 404, mirroring how
+  `GET /positions` already behaved since Step 3.
+- `src/api/handler.py` no longer imports Skyfield, numpy, or
+  `shared/passes.py` at all — `sattrack-api` is now a pure
+  DynamoDB-Scan-and-serialize Lambda. The Skyfield Lambda layer resource
+  stays defined in `lambda_api.tf` (moving it to `alerts.tf` felt like
+  churn for a personal project, matching this file's existing "don't
+  rename/reorganize working things" convention) but is no longer attached
+  to `aws_lambda_function.api` — `aws_lambda_function.alerts` is its only
+  remaining consumer.
+- `sattrack-api`'s IAM policy narrowed from `["dynamodb:GetItem",
+  "dynamodb:Scan"]` to just `"dynamodb:Scan"` — `GetItem` only ever
+  backed the two now-removed per-item routes.
+- `memory_size` deliberately left at 512 MB rather than re-tuned down:
+  the original justification (numpy import headroom) is gone, but
+  Scan+JSON-serialize of the ~10,800-item catalog is the thing sizing it
+  now, and that was proven to fit the 30s timeout (bumped for exactly
+  this reason in Step 3) at 512 MB — lowering it untested risked
+  reintroducing the timeout risk Step 3 deliberately budgeted against.
+- Tests: the two retired routes' request-shape tests (missing lat/lon,
+  out-of-range observer, unknown-satellite-404) replaced with two
+  retired-route 404 assertions, mirroring the existing `GET /positions`
+  one. The shared-module tests (`subpoint_of`, `compute_passes`,
+  `azimuth_to_compass`, the numpy-JSON-serialization regression test)
+  moved out of `test_api.py` into a new `tests/test_passes.py` — they
+  test `shared/passes.py` directly via its own public functions, not any
+  API route, and had nothing left to do with the API handler once its
+  Skyfield dependency was gone. All 28 tests pass post-split.
+- This closes out Phase 6's sequencing list in full (items 1-5 above).
+
 ### Quick wins (trivial–easy, no new infra)
 
 1. **TTL on TLE items** (~7 days) — the table's TTL attribute already

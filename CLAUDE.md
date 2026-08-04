@@ -67,17 +67,17 @@ satellite-tracker/
 │   ├── main.tf                # Phase 1 as-built: DynamoDB, S3 archive, Lambda, IAM, Scheduler ✓
 │   ├── locals.tf              # Naming prefix, common tags, API route map ✓
 │   ├── outputs.tf             # Table/bucket/function names, API endpoint — grows per phase ✓
-│   ├── lambda_api.tf          # Phase 2 — position API Lambda + Skyfield layer ✓
-│   ├── api_gateway.tf         # Phase 2 — HTTP API + routes ✓
+│   ├── lambda_api.tf          # Phase 2 — position API Lambda (Skyfield layer dropped in Phase 6 Step 5) ✓
+│   ├── api_gateway.tf         # Phase 2 — HTTP API + routes (1 route as of Phase 6 Step 5) ✓
 │   ├── variables.tf           # cesium_ion_token (supplied via gitignored *.auto.tfvars) ✓
-│   ├── frontend.tf            # Phase 3 — S3 + CloudFront (OAC) + generated config.js ✓
-│   ├── alerts.tf              # Phase 4 — pass-check Lambda + SNS topic + SMS subscription (TODO)
+│   ├── frontend.tf            # Phase 3 — S3 + CloudFront (OAC) + generated config.js; also Phase 6 Step 4's apigw-satellites cache origin ✓
+│   ├── alerts.tf              # Phase 4 — pass-check Lambda + SNS topic + email subscription (SMS pending toll-free registration) ✓
 │   └── cicd_oidc.tf           # Phase 5 — GitHub OIDC provider + scoped plan/apply roles ✓
 ├── src/                       # Lambda source (Python)
 │   ├── tle_fetch/             # Phase 1 handler ✓
-│   ├── api/                   # Phase 2 handler — 4 routes ✓
-│   ├── shared/                # Pass/visibility logic shared by API + Phase 4 alerts ✓
-│   ├── alerts/                # Phase 4 handler (TODO)
+│   ├── api/                   # Phase 2 handler — 1 route (GET /satellites) as of Phase 6 Step 5 ✓
+│   ├── shared/                # Pass/visibility logic — Phase 4 alerts Lambda only as of Phase 6 Step 5 ✓
+│   ├── alerts/                # Phase 4 handler ✓
 │   └── layers/skyfield/       # Layer build.py + requirements (zip output gitignored) ✓
 ├── tests/                     # pytest + moto unit tests (Phase 1 covered) ✓
 ├── frontend/                  # Phase 3 — CesiumJS globe (index.html, app.js, app.css) ✓
@@ -337,6 +337,55 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     `logs:PutResourcePolicy`/`DescribeResourcePolicies`, the new
     `/aws/apigateway/sattrack-*` log-group ARN pattern) — same "grow the
     policy in the same PR" discipline as everything else in that file.
+
+- **Phase 6 — client-side propagation, Steps 1-5 deployed 2026-08-01
+  through 2026-08-04, live** (see DESIGN.md's Phase 6 section for the full
+  as-built rationale and gotchas; this is the condensed status):
+  - **Steps 1-2:** satellite.js (v7.1.0, ESM-only CDN import) replaced
+    server-computed positions/passes with client-side SGP4 propagation
+    against `GET /satellites`'s TLE payload; Geolocation + manual entry
+    drive local pass prediction. Parity-verified against the old
+    server-Skyfield route before it was retired.
+  - **Step 3:** catalog widened to include CelesTrak's `starlink` group
+    (~10,769 objects) alongside the 23 tracked stations. `GET /positions`
+    retired (no consumers left once Steps 1-2 landed). Bulk swarm renders
+    via a separate `PointPrimitiveCollection` (not the Entity API),
+    propagation amortized across an `onTick` rolling slice.
+  - **Step 4 — deployed 2026-08-04:** `GET /satellites` is now served
+    through the existing frontend CloudFront distribution (new
+    `apigw-satellites` origin + dedicated `/satellites` cache behavior,
+    1-2h TTL matching the 2h TLE fetch cadence) instead of hitting
+    Lambda/DynamoDB on every client poll — verified via `X-Cache: Hit
+    from cloudfront` on a repeat request. The frontend's generated
+    `apiBaseUrl` points at the CloudFront domain, so the call is also
+    same-origin now (no CORS preflight).
+  - **Step 5 — deployed 2026-08-04:** retired `GET
+    /satellites/{id}/position` and `GET /satellites/{id}/passes` (no
+    frontend consumers since Steps 1-2) and dropped the Skyfield Lambda
+    layer, `shared/passes.py`, and `dynamodb:GetItem` from `sattrack-api`
+    entirely — that Lambda is now a pure DynamoDB-Scan-and-serialize
+    read of the TLE catalog, no numpy/Skyfield import cost. Skyfield
+    stays exactly where Step 5's carve-out says it should: the alerts
+    Lambda only, against the fixed home observer. Route-specific tests
+    for the two retired routes replaced with 404-on-retired-route
+    assertions (mirroring the existing `GET /positions` one); the
+    shared-module pass/subpoint tests moved out of `test_api.py` into a
+    new `tests/test_passes.py` since they test `shared/passes.py`
+    directly and no longer have anything to do with the API handler.
+  - **Bug found and fixed during Step 4 verification, not caused by
+    it:** the Starlink swarm render could crash with `TypeError: Cannot
+    read properties of null (reading 'position')`. Root cause:
+    `satellite.propagate()` can return `null` outright for some
+    satrecs — not just `{ position: false }`, which was the only case
+    the original Step 3 guard checked — plus a quieter case where
+    propagation "succeeds" with NaN-filled ECI components that pass a
+    truthy check but produce a NaN `Cartesian3` that breaks Cesium's
+    bounding-volume math the same way. Reproduced live against the real
+    10,769-object swarm and fixed with a shared `hasValidPosition()`
+    guard (null + finite-component check); skip logging throttled
+    (once per satellite per catalog refresh for the named group, once
+    per full cycle for the bulk swarm) so a persistently-bad object
+    can't flood the console forever.
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
