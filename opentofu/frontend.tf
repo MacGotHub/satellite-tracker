@@ -69,9 +69,14 @@ resource "aws_s3_object" "frontend_config" {
   bucket       = aws_s3_bucket.frontend.id
   key          = "config.js"
   content_type = "text/javascript"
-  content      = <<-EOT
+  # Phase 6 Step 4: routed through this same CloudFront distribution
+  # (see the "apigw-satellites" origin/behavior below) instead of the raw
+  # execute-api endpoint, so GET /satellites is CDN-cached and the browser
+  # call becomes same-origin (no CORS preflight). The raw endpoint (see the
+  # api_endpoint output) still works directly for ad-hoc testing.
+  content = <<-EOT
     window.SATTRACK_CONFIG = {
-      apiBaseUrl: "${aws_apigatewayv2_api.sattrack.api_endpoint}",
+      apiBaseUrl: "https://${aws_cloudfront_distribution.frontend.domain_name}",
       cesiumIonToken: "${var.cesium_ion_token}",
     };
   EOT
@@ -91,6 +96,34 @@ resource "aws_cloudfront_cache_policy" "frontend" {
   name        = "${local.name_prefix}-frontend"
   default_ttl = 300
   max_ttl     = 3600
+  min_ttl     = 0
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config {
+      cookie_behavior = "none"
+    }
+    headers_config {
+      header_behavior = "none"
+    }
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+    enable_accept_encoding_brotli = true
+    enable_accept_encoding_gzip   = true
+  }
+}
+
+# Phase 6 Step 4: GET /satellites is observer-independent (same payload for
+# every viewer) and only changes as often as Phase 1's fetch schedule —
+# caching it turns Starlink-scale catalog scans from a per-poll DynamoDB
+# cost into a per-cache-miss one. TTL brackets the 2h fetch cadence
+# (main.tf's aws_scheduler_schedule.tle_fetcher): no point serving data
+# fresher than the source refreshes, but also no point holding it a full
+# cycle past a refresh.
+resource "aws_cloudfront_cache_policy" "satellites_api" {
+  name        = "${local.name_prefix}-satellites-api"
+  default_ttl = 3600
+  max_ttl     = 7200
   min_ttl     = 0
 
   parameters_in_cache_key_and_forwarded_to_origin {
@@ -144,12 +177,41 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
+  # execute-api domains are HTTPS-only, hence the custom_origin_config
+  # (not another origin_access_control, which is S3-specific).
+  origin {
+    domain_name = replace(aws_apigatewayv2_api.sattrack.api_endpoint, "https://", "")
+    origin_id   = "apigw-satellites"
+
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "https-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
+
   default_cache_behavior {
     target_origin_id           = "s3-frontend"
     viewer_protocol_policy     = "redirect-to-https"
     allowed_methods            = ["GET", "HEAD"]
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.frontend.id
+    response_headers_policy_id = local.cloudfront_managed_security_headers_policy_id
+    compress                   = true
+  }
+
+  # No wildcard: HTTP API's only frontend-facing route today is exactly
+  # GET /satellites (Phase 6 Step 3 retired /positions; the two remaining
+  # per-item routes are unused by the browser and deliberately left off
+  # this cached path — see Step 5 in DESIGN.md for retiring them outright).
+  ordered_cache_behavior {
+    path_pattern               = "/satellites"
+    target_origin_id           = "apigw-satellites"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = aws_cloudfront_cache_policy.satellites_api.id
     response_headers_policy_id = local.cloudfront_managed_security_headers_policy_id
     compress                   = true
   }
