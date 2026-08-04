@@ -1004,6 +1004,56 @@ dependency. As-built notes:
    **If Phase 6 lands first:** this classification math (sun altitude,
    twilight thresholds) needs a JS port to run against satellite.js
    output — same logic, different runtime, not a Python change.
+
+   **Done — implemented and verified 2026-08-04, live.** Landed as the JS
+   port this item anticipated, in a new `frontend/sun.js` module (imported
+   by `app.js`, same pattern as the satellite.js CDN import): a
+   low-precision solar position formula (Astronomical Almanac "low
+   accuracy" algorithm, ~0.01° precision — no ephemeris download needed,
+   unlike the Skyfield/de421 path this mirrors) plus a cylindrical
+   Earth-shadow model for the satellite's own sunlit/eclipsed state.
+   `findPassesLocal()`'s pass objects now carry a real `visible`
+   (true/false, not the `null` placeholder from before) and a `reason`
+   (`"daylight"` or `"eclipsed"`) for non-visible ones. Frontend defaults
+   to visible-only with a "show all passes" toggle, per spec — toggling
+   re-filters an already-computed list rather than re-running the 14-day
+   scan, and the empty state distinguishes "nothing overhead at all" from
+   "passes exist, none visible" rather than looking identical.
+
+   **Verified correct, not just running:** independently scanned sun
+   altitude across 24h at the observer's coordinates (south Florida) and
+   confirmed sunrise/solar-noon/sunset all landed within a minute or two
+   of real-world expectations for the date/location — including solar
+   noon correctly offset ~24 min past clock noon from Florida's longitude
+   within the EDT zone, which a sign or frame error would have gotten
+   visibly wrong. Then cross-checked the actual pass classifications
+   against that scan: every "daylight" pass fell at a time the
+   independent scan had the sun above the -6° threshold, and the 4
+   "visible" ISS passes found all clustered in the pre-dawn hours (~5 AM
+   local) immediately before the calculated sunrise — the classic
+   dawn/dusk-terminator clustering real ISS visibility actually has, not
+   an artifact. 2 "eclipsed" results also appeared in that same pre-dawn
+   window (observer dark, but ISS itself not yet catching sunlight at
+   that specific orbital crossing) — the expected boundary-zone mix, not
+   an all-or-nothing split.
+
+   **Deliberate scope trim vs. the original spec above:** shipped a
+   single civil-twilight threshold (-6°, matching
+   `OBSERVER_DARK_SUN_ALTITUDE_DEG` in `shared/passes.py` exactly —
+   duplicated across the two runtimes on purpose, not shared, per Phase
+   6's "two engines by design" carve-out) rather than the full
+   civil/nautical/astronomical set this item originally proposed — civil
+   twilight is what the *server-side* alerts Lambda already uses in
+   production, so matching it keeps the two verdicts consistent rather
+   than introducing a second, different definition of "visible" for the
+   same satellite. `too_low` also not implemented as a category: every
+   pass in `findPassesLocal()`'s output already cleared its own
+   `minElevationDeg` search threshold by construction, so nothing in this
+   function's output is actually "too low" — that reason only makes sense
+   against a *second*, stricter threshold (e.g. `alerts.tf`'s 30° alert
+   bar), which is a "worth texting about" distinction, not a "worth
+   showing in a browsable list" one. Revisit if a future increment wants
+   that distinction surfaced in the UI too.
 9. **"Next visible pass" hero field** at the top of the panel, once #8
    lands — this is the question users are actually asking. Handle the
    honest empty case explicitly: no visible passes in the next N days,

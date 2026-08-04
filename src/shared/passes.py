@@ -18,6 +18,10 @@ from skyfield.api import wgs84
 # Sun altitude below which the ground observer counts as "in darkness".
 # -6 deg is civil twilight — bright satellites become visible around then;
 # waiting for full astronomical darkness (-18 deg) would drop real sightings.
+# Mirrored (not shared — see Phase 6's "two engines by design" carve-out
+# in DESIGN.md) as OBSERVER_DARK_SUN_ALTITUDE_DEG in frontend/app.js,
+# which does the equivalent classification client-side against
+# satellite.js output via frontend/sun.js's low-precision sun position.
 OBSERVER_DARK_SUN_ALTITUDE_DEG = -6.0
 
 _COMPASS_POINTS = [

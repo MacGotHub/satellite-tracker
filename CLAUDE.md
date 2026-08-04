@@ -406,6 +406,21 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     untouched (still ISS-only) — this is a globe/pass-prediction change,
     not an alerting one. See DESIGN.md item 13 for the group-overlap
     (ISS/Tiangong in both `stations` and `visual`) tag-priority note.
+  - **Item 8 (visibility classification) — deployed 2026-08-04, live:**
+    new `frontend/sun.js` module — a low-precision solar position formula
+    plus a cylindrical Earth-shadow model, since satellite.js has no
+    Skyfield-equivalent for either. `findPassesLocal()` passes now carry
+    a real `visible: true/false` and a `reason` (`daylight`/`eclipsed`)
+    instead of the `null` placeholder. Frontend defaults to visible-only
+    with a "show all passes" toggle. Verified correct (not just running)
+    by independently scanning sun altitude across 24h and confirming
+    sunrise/noon/sunset matched real-world expectations, then
+    cross-checking pass classifications against that scan — see
+    DESIGN.md item 8 for the full verification writeup and the deliberate
+    scope trim (single civil-twilight threshold matching the alerts
+    Lambda exactly; no `too_low` category — neither the full
+    civil/nautical/astronomical set nor a second stricter threshold
+    the original backlog item proposed).
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
