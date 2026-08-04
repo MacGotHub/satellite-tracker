@@ -421,6 +421,18 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     Lambda exactly; no `too_low` category — neither the full
     civil/nautical/astronomical set nor a second stricter threshold
     the original backlog item proposed).
+  - **Incident, same night:** shipping `sun.js` (a brand-new file)
+    briefly broke the entire live site — the `frontend` bucket's
+    `aws:kms` default encryption (set in Phase 5, never actually taken
+    up by any *existing* object) applied to this first genuinely new
+    key, and CloudFront's OAC can't decrypt SSE-KMS objects on an
+    AWS-managed key without a grant that key type can't be given. Fixed:
+    `frontend` bucket's default flipped to `AES256` (matches what every
+    object already silently used), plus a live re-encrypt of the already
+    -uploaded object and a full CloudFront invalidation. `tle_archive`
+    unaffected (not served via CloudFront). Full incident writeup in
+    DESIGN.md item 8 — worth reading before adding any new file to the
+    frontend bucket in the future.
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
