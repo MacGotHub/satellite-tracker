@@ -11,6 +11,7 @@
 "use strict";
 
 import * as satellite from "https://cdn.jsdelivr.net/npm/satellite.js@7.1.0/+esm";
+import { sunPosition, sunAltitudeDeg, isSunlit } from "./sun.js";
 
 const config = window.SATTRACK_CONFIG || {};
 const API = (config.apiBaseUrl || "").replace(/\/$/, "");
@@ -321,6 +322,7 @@ searchInput.addEventListener("change", () => {
 const panel = document.getElementById("panel");
 const passesList = document.getElementById("passes-list");
 const passesButton = document.getElementById("passes-load");
+const passesShowAllInput = document.getElementById("passes-show-all");
 
 function selectedSat() {
   const entity = viewer.selectedEntity;
@@ -345,6 +347,7 @@ function refreshPanel() {
 
 viewer.selectedEntityChanged.addEventListener(() => {
   passesList.replaceChildren();
+  lastComputedPasses = null; // stale for the newly-selected satellite
   refreshPanel(); // immediate on selection change, not throttle-delayed
 });
 
@@ -386,11 +389,16 @@ obsManualForm.addEventListener("submit", (event) => {
 });
 
 /* ---------- local pass prediction ---------- */
-/* Geometry only (rise/culminate/set, azimuth, elevation) — deliberately no
- * sunlit/twilight visibility classification yet, that's a later increment.
- * `visible: null` mirrors compute_passes(eph=None) in shared/passes.py,
- * which uses the same sentinel for "not classified yet". satellite.js has
- * no find_events() equivalent, so this is a simple time-stepped scan. */
+/* Rise/culminate/set, azimuth, elevation, and (DESIGN.md backlog item 8)
+ * a visibility verdict — satellite.js has no find_events() equivalent, so
+ * this is a simple time-stepped scan, not a root-finder. */
+
+// Sun altitude below which the ground observer counts as "in darkness" —
+// civil twilight. Must match OBSERVER_DARK_SUN_ALTITUDE_DEG in
+// shared/passes.py exactly: same threshold, deliberately duplicated
+// across the two runtimes (alerts Lambda vs. browser) rather than shared,
+// per Phase 6's own "two engines by design" carve-out.
+const OBSERVER_DARK_SUN_ALTITUDE_DEG = -6.0;
 
 const _COMPASS_POINTS = [
   "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
@@ -399,6 +407,27 @@ const _COMPASS_POINTS = [
 
 function azimuthToCompass(azimuthDeg) {
   return _COMPASS_POINTS[Math.round(azimuthDeg / 22.5) % 16];
+}
+
+// Daylight is checked before eclipsed: a bright sky blocks every
+// satellite equally, while eclipsed is specific to this one satellite at
+// this one instant — daylight is the more fundamental, more informative
+// reason when both happen to be true at once.
+function classifyVisibility(satrec, peakTime, observerLatDeg, observerLonDeg) {
+  const posVel = satellite.propagate(satrec, peakTime);
+  if (!hasValidPosition(posVel)) return { visible: null, reason: null };
+
+  const sun = sunPosition(peakTime);
+  const gmst = satellite.gstime(peakTime);
+  const observerSunAltDeg = sunAltitudeDeg(sun, observerLatDeg, observerLonDeg, gmst);
+
+  if (observerSunAltDeg >= OBSERVER_DARK_SUN_ALTITUDE_DEG) {
+    return { visible: false, reason: "daylight" };
+  }
+  if (!isSunlit(posVel.position, sun)) {
+    return { visible: false, reason: "eclipsed" };
+  }
+  return { visible: true, reason: null };
 }
 
 function lookAngles(satrec, date, observerGd) {
@@ -464,6 +493,12 @@ function findPassesLocal(
       if (!current.partial) {
         const setTime = interpolateCrossing(prev, sample, minElevationDeg);
         const peak = current.samples.reduce((a, b) => (b.elevationDeg > a.elevationDeg ? b : a));
+        const { visible, reason } = classifyVisibility(
+          satrec,
+          peak.time,
+          observerLatDeg,
+          observerLonDeg
+        );
         passes.push({
           rise: current.rise.time.toISOString(),
           rise_direction: azimuthToCompass(current.rise.azimuthDeg),
@@ -471,7 +506,8 @@ function findPassesLocal(
           set: setTime.toISOString(),
           max_elevation_deg: Math.round(peak.elevationDeg * 10) / 10,
           direction: azimuthToCompass(peak.azimuthDeg),
-          visible: null,
+          visible,
+          reason,
         });
       }
       current = null;
@@ -494,35 +530,71 @@ function li(text, className) {
   return item;
 }
 
+// null (not yet computed for the currently-selected satellite) vs. []
+// (computed, genuinely zero passes) matter differently to the "show all"
+// toggle handler below — keep them distinguishable, don't collapse to [].
+let lastComputedPasses = null;
+
+const VISIBILITY_REASON_LABELS = {
+  daylight: "daylight",
+  eclipsed: "satellite in shadow",
+};
+
+function passLabel(p) {
+  // month/day, not just weekday: over a multi-week window "Mon" alone is
+  // ambiguous — there can be two of them.
+  const peakTime = new Date(p.culminate).toLocaleString([], {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const setTime = new Date(p.set).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const base = `${peakTime} — peaks ${p.max_elevation_deg}° ${p.direction} ` +
+    `(rises ${p.rise_direction}, sets ${setTime})`;
+  return p.visible ? base : `${base} — ${VISIBILITY_REASON_LABELS[p.reason] || "not visible"}`;
+}
+
 function renderPasses(passes) {
+  lastComputedPasses = passes;
+  const showAll = passesShowAllInput.checked;
+  const shown = showAll ? passes : passes.filter((p) => p.visible);
+
   if (!passes.length) {
     passesList.replaceChildren(
       li(`No passes above 10° in the next ${PASS_SEARCH_DAYS} days.`)
     );
     return;
   }
+  if (!shown.length) {
+    // Passes exist but none are visible — a materially different empty
+    // case from "nothing overhead at all" above; DESIGN.md item 8 asks
+    // for the verdict to read as *explaining the sky*, not just going
+    // quiet the same way an empty catalog would.
+    passesList.replaceChildren(
+      li(
+        `${passes.length} pass${passes.length === 1 ? "" : "es"} in the ` +
+          `next ${PASS_SEARCH_DAYS} days, but none visible (daylight or ` +
+          `Earth's shadow). Check "show all passes" to see them.`
+      )
+    );
+    return;
+  }
   passesList.replaceChildren(
-    ...passes.map((p) => {
-      // month/day, not just weekday: over a multi-week window "Mon" alone
-      // is ambiguous — there can be two of them.
-      const peakTime = new Date(p.culminate).toLocaleString([], {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      const setTime = new Date(p.set).toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      return li(
-        `${peakTime} — peaks ${p.max_elevation_deg}° ${p.direction} ` +
-          `(rises ${p.rise_direction}, sets ${setTime})`
-      );
-    })
+    ...shown.map((p) => li(passLabel(p), p.visible ? undefined : "pass-dim"))
   );
 }
+
+// Re-filter the already-computed list instead of re-running the (now up
+// to 14-day) propagation scan just to flip a display filter.
+passesShowAllInput.addEventListener("change", () => {
+  if (lastComputedPasses === null) return; // nothing computed yet
+  renderPasses(lastComputedPasses);
+});
 
 const PASSES_BUTTON_DEFAULT_LABEL = "Predict passes here (use my location)";
 

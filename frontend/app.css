@@ -64,6 +64,15 @@ html, body, #globe {
 
 #passes h3 { margin: 14px 0 4px; font-size: 0.9rem; }
 #passes-hint { color: #8fa3b8; font-size: 0.75rem; margin: 0 0 8px; }
+#passes-show-all-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #8fa3b8;
+  font-size: 0.75rem;
+  margin: 0 0 10px;
+  cursor: pointer;
+}
 
 #obs-active { font-size: 0.75rem; color: #9fd8ff; margin: 0 0 8px; }
 
@@ -108,3 +117,4 @@ html, body, #globe {
 
 #passes-list { margin: 8px 0 0; padding-left: 18px; }
 #passes-list li { margin-bottom: 8px; line-height: 1.35; }
+#passes-list li.pass-dim { color: #8fa3b8; }
