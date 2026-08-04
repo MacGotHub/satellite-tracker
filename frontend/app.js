@@ -15,11 +15,18 @@ import * as satellite from "https://cdn.jsdelivr.net/npm/satellite.js@7.1.0/+esm
 const config = window.SATTRACK_CONFIG || {};
 const API = (config.apiBaseUrl || "").replace(/\/$/, "");
 
-// TLEs only change on Phase 1's 2-hour fetch schedule and there's no
-// CloudFront cache in front of this route yet (that's a later Phase 6
-// step) — 30 min is a polite client cadence with headroom either way.
+// TLEs only change on Phase 1's 2-hour fetch schedule, and Phase 6 Step 4
+// put a 1-2h CloudFront cache in front of this route — 30 min is a polite
+// client cadence with headroom either way.
 const CATALOG_REFRESH_MS = 30 * 60_000;
 const PANEL_THROTTLE_MS = 1_000;
+
+// ISS-class visible passes arrive in clusters separated by weeks, so a
+// short window legitimately returns "no passes" most of the time —
+// propagating one satellite over two weeks is milliseconds, so there's no
+// real cost to widening it. Keep index.html's passes-hint text in sync if
+// this changes.
+const PASS_SEARCH_DAYS = 14;
 
 const statusEl = document.getElementById("status");
 
@@ -420,7 +427,7 @@ function findPassesLocal(
   satrec,
   observerLatDeg,
   observerLonDeg,
-  { hours = 48, minElevationDeg = 10, stepSeconds = 30 } = {}
+  { hours = PASS_SEARCH_DAYS * 24, minElevationDeg = 10, stepSeconds = 30 } = {}
 ) {
   const observerGd = {
     latitude: satellite.degreesToRadians(observerLatDeg),
@@ -489,13 +496,19 @@ function li(text, className) {
 
 function renderPasses(passes) {
   if (!passes.length) {
-    passesList.replaceChildren(li("No passes above 10° in the next 48 h."));
+    passesList.replaceChildren(
+      li(`No passes above 10° in the next ${PASS_SEARCH_DAYS} days.`)
+    );
     return;
   }
   passesList.replaceChildren(
     ...passes.map((p) => {
+      // month/day, not just weekday: over a multi-week window "Mon" alone
+      // is ambiguous — there can be two of them.
       const peakTime = new Date(p.culminate).toLocaleString([], {
         weekday: "short",
+        month: "short",
+        day: "numeric",
         hour: "2-digit",
         minute: "2-digit",
       });
@@ -511,8 +524,21 @@ function renderPasses(passes) {
   );
 }
 
+const PASSES_BUTTON_DEFAULT_LABEL = "Predict passes here (use my location)";
+
 function computeAndRenderPasses(sat, lat, lon) {
-  renderPasses(findPassesLocal(sat.satrec, lat, lon));
+  passesButton.disabled = true;
+  passesButton.textContent = "Computing…";
+  // Defer to the next paint so "Computing…" actually becomes visible
+  // before the synchronous propagation loop runs — at PASS_SEARCH_DAYS's
+  // 14-day window (30s steps, ~40k satellite.propagate() calls) this is
+  // long enough to freeze the tab for a moment without this, which read
+  // as a hang rather than a computation in progress.
+  requestAnimationFrame(() => {
+    renderPasses(findPassesLocal(sat.satrec, lat, lon));
+    passesButton.disabled = false;
+    passesButton.textContent = PASSES_BUTTON_DEFAULT_LABEL;
+  });
 }
 
 passesButton.addEventListener("click", () => {
@@ -534,15 +560,13 @@ passesButton.addEventListener("click", () => {
       const { latitude, longitude } = pos.coords;
       setActiveObserver(latitude, longitude, "browser");
       computeAndRenderPasses(sat, latitude, longitude);
-      passesButton.disabled = false;
-      passesButton.textContent = "Predict passes here (use my location)";
     },
     () => {
       passesList.replaceChildren(
         li("Location permission needed — or enter coordinates above.")
       );
       passesButton.disabled = false;
-      passesButton.textContent = "Predict passes here (use my location)";
+      passesButton.textContent = PASSES_BUTTON_DEFAULT_LABEL;
     },
     { timeout: 10_000 }
   );
