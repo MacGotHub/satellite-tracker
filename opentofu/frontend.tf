@@ -21,6 +21,11 @@ locals {
 resource "aws_s3_bucket" "frontend" {
   # checkov:skip=CKV2_AWS_61: static site bucket — OpenTofu overwrites the
   # same keys in place on every deploy, nothing accumulates that needs expiry.
+  # checkov:skip=CKV_AWS_145: AES256 (SSE-S3), not KMS, is deliberate here —
+  # see the aws_s3_bucket_server_side_encryption_configuration.frontend
+  # resource below for why (CloudFront OAC can't decrypt SSE-KMS on an
+  # AWS-managed key, and this project's cost posture already declined
+  # customer-managed CMKs elsewhere — same tradeoff, applied consistently).
   bucket = "${local.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
 
   tags = {
