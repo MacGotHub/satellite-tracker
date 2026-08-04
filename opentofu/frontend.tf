@@ -21,6 +21,11 @@ locals {
 resource "aws_s3_bucket" "frontend" {
   # checkov:skip=CKV2_AWS_61: static site bucket — OpenTofu overwrites the
   # same keys in place on every deploy, nothing accumulates that needs expiry.
+  # checkov:skip=CKV_AWS_145: AES256 (SSE-S3), not KMS, is deliberate here —
+  # see the aws_s3_bucket_server_side_encryption_configuration.frontend
+  # resource below for why (CloudFront OAC can't decrypt SSE-KMS on an
+  # AWS-managed key, and this project's cost posture already declined
+  # customer-managed CMKs elsewhere — same tradeoff, applied consistently).
   bucket = "${local.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
 
   tags = {
@@ -37,14 +42,30 @@ resource "aws_s3_bucket_public_access_block" "frontend" {
   restrict_public_buckets = true
 }
 
-# AWS-managed key (aws/s3), not a customer CMK — same protection Checkov's
-# KMS check wants, zero monthly key cost.
+# AES256 (SSE-S3), not aws:kms — deliberately different from the other
+# buckets in this project (tle_archive uses the AWS-managed KMS key with
+# zero issues). This bucket is served through CloudFront's Origin Access
+# Control, and OAC cannot decrypt SSE-KMS objects encrypted with an
+# AWS-managed key: AWS requires an extra key-policy grant scoped to the
+# distribution for that to work (see AWS's own CloudFront + OAC + S3 docs
+# on the SSE-KMS caveat), and AWS-managed keys' policies aren't
+# customer-editable the way a customer-managed CMK's is — this project's
+# own cost-driven "AWS-managed key, not a customer CMK" choice (see
+# .checkov.yaml) is exactly what makes that extra grant impossible here.
+# Discovered the hard way 2026-08-04: every object already in this bucket
+# still carried AES256 from before this resource briefly set aws:kms
+# during the Phase 5 Checkov pass, silently masking the incompatibility —
+# it only surfaced when sun.js became the first genuinely new key
+# written since, and CloudFront 403'd it. AES256 still satisfies Checkov's
+# general "encrypted at rest" check; it's specifically a *customer-managed
+# KMS key* skip (already accepted in .checkov.yaml for other resources)
+# this project isn't paying for, not an unencrypted bucket.
 resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
   bucket = aws_s3_bucket.frontend.id
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm = "aws:kms"
+      sse_algorithm = "AES256"
     }
   }
 }

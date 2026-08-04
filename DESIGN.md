@@ -1054,6 +1054,53 @@ dependency. As-built notes:
    bar), which is a "worth texting about" distinction, not a "worth
    showing in a browsable list" one. Revisit if a future increment wants
    that distinction surfaced in the UI too.
+
+   **Incident, same night: SSE-KMS + CloudFront OAC don't mix on an
+   AWS-managed key — shipping `sun.js` broke the live site.** The
+   `frontend` S3 bucket's default encryption was `aws:kms` (set during
+   Phase 5's Checkov hardening pass), but every object already in the
+   bucket still carried the *older* `AES256` encryption from before that
+   change — S3's bucket-default encryption only applies going forward,
+   and apparently existing keys don't necessarily pick up a new default
+   on a content-only overwrite either (confirmed empirically: `app.js`,
+   re-uploaded in the very same `apply` as `sun.js`, kept `AES256`;
+   `sun.js`, a genuinely new key, got `aws:kms`). CloudFront's Origin
+   Access Control cannot decrypt SSE-KMS objects encrypted with an
+   AWS-managed key without an extra key-policy grant scoped to the
+   distribution — and AWS-managed keys' policies aren't customer-editable
+   the way a customer-managed CMK's is, so that grant can't be added here
+   without switching to a paid CMK (a cost this project's Checkov posture
+   deliberately declined, see `.checkov.yaml`). Net effect: `sun.js`
+   403'd from CloudFront, and since `app.js` hard-`import`s it, **the
+   entire site failed to load** for a few minutes — this wasn't a
+   degraded feature, item 8 shipping broke Phase 6 through Step 5 too.
+   Diagnosed by comparing `head-object` output across working vs. broken
+   files (same bucket, same policy, only the `ServerSideEncryption` field
+   differed) — ruled out cache staleness, KMS key policy gaps (the
+   AWS-managed key's policy already grants decrypt to any authorized
+   in-account S3 caller; that's not what OAC needs), and the CloudFront
+   distribution being mid-deploy (it wasn't) before landing on the real
+   cause. Fixed in two parts: (1) `aws s3 cp` self-copy to immediately
+   re-encrypt the live `sun.js` object as `AES256`, unblocking the site
+   in minutes without waiting on a PR; (2) changed
+   `aws_s3_bucket_server_side_encryption_configuration.frontend`'s
+   `sse_algorithm` to `AES256` to prevent recurrence for any future new
+   file — `tle_archive`'s bucket (main.tf) is unaffected and correctly
+   stays on `aws:kms`, since it's never served through CloudFront/OAC.
+   A second, unrelated staleness bug surfaced during the same
+   verification pass: CloudFront caches `index.html` and `app.js`
+   independently (each with its own TTL), so an edge node can serve a
+   *stale* `index.html` alongside a *fresh* `app.js` — this manifested as
+   `document.getElementById("passes-show-all")` returning `null` (the
+   fresh `app.js` expected markup the stale `index.html` didn't have
+   yet), crashing the toggle wire-up. Fixed with a full `/*` CloudFront
+   invalidation rather than chasing individual paths. **Lesson for future
+   frontend deploys:** a brand-new file being added to the S3 bucket, or
+   any deploy under real time pressure, is worth a live-browser check
+   with a hard reload immediately after `apply.yml` completes — this
+   project's existing CDN caching (Phase 3's 5-min TTL, Phase 6 Step 4's
+   1-2h TTL) does not guarantee two files in the same deploy propagate to
+   the same edge node atomically together.
 9. **"Next visible pass" hero field** at the top of the panel, once #8
    lands — this is the question users are actually asking. Handle the
    honest empty case explicitly: no visible passes in the next N days,
