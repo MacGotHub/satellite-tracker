@@ -387,6 +387,17 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     per full cycle for the bulk swarm) so a persistently-bad object
     can't flood the console forever.
 
+- **Post-Phase-6 enhancements** — working through DESIGN.md's backlog
+  list now that Phase 6 is closed out. Sequence: pass-window extension →
+  widen tracked groups (item 13) → visibility classification (item 8) →
+  "next visible pass" hero field (item 9), the last two being how "what's
+  visible this week" gets answered.
+  - **Item 4 (pass search window) — deployed 2026-08-04, live:** 48h → 14
+    days in `findPassesLocal()`. See DESIGN.md item 4 for the full
+    as-built note, including a CORS gap found (not fixed) on the raw API
+    endpoint for cross-origin callers — harmless for the deployed site
+    itself, which is same-origin through CloudFront as of Step 4.
+
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
   history pushed (was local-only for two days)

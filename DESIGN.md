@@ -936,6 +936,36 @@ dependency. As-built notes:
    visible passes arrive in clusters separated by weeks, so a short window
    legitimately returns zero most of the time. Propagating one satellite
    over two weeks is milliseconds — cost is negligible.
+
+   **Done — implemented and verified 2026-08-04, live.** Landed as a
+   `findPassesLocal()` change in `app.js` (Phase 6 already having made
+   this a client-side concern, per the roadmap-interaction note above) —
+   `PASS_SEARCH_DAYS = 14`. Also updated: the empty-state and hint copy
+   (both previously hardcoded "48 h"), and the peak-time display now
+   includes month/day, not just weekday — over a 2-week window "Mon"
+   alone is ambiguous. Added a "Computing…" busy state (disable the
+   button, defer via `requestAnimationFrame` so the label actually
+   paints before the synchronous loop runs) anticipating the ~7x jump in
+   `satellite.propagate()` calls per click (5,760 → 40,320 at the
+   existing 30s step size) — turned out to be unnecessary caution:
+   verified live, the full computation for one satellite completes
+   fast enough to be visually instant, no perceptible freeze. Kept the
+   busy state anyway as cheap insurance against slower devices or any
+   future further widening.
+
+   **Side finding, not caused by this item — flagged, not yet fixed:**
+   verifying this against a local dev server (a second origin from the
+   deployed CloudFront domain) surfaced that Step 4's `/satellites`
+   cache behavior doesn't forward the `Origin` header to API Gateway, so
+   CORS response headers never come back on cross-origin requests to
+   that path — confirmed via `curl -H "Origin: ..."` returning no
+   `Access-Control-Allow-Origin`. Harmless for the deployed site itself
+   (frontend and API are same-origin through CloudFront as of Step 4),
+   but it means the raw `api_endpoint` output is no longer cleanly
+   callable cross-origin by anything else (a separate local dev server,
+   a future second client). Fix would be adding `Origin` to the
+   `satellites_api` cache policy's `headers_config` — not done here,
+   out of scope for a pass-window change.
 5. **Observer location as a query parameter** —
    `GET /satellites/{id}/passes?lat=&lon=&elev=`, falling back to the SSM
    observer when omitted. Keeps the existing alerting path and any current
