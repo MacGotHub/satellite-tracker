@@ -397,6 +397,15 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     as-built note, including a CORS gap found (not fixed) on the raw API
     endpoint for cross-origin callers — harmless for the deployed site
     itself, which is same-origin through CloudFront as of Step 4.
+  - **Item 13 (widen tracked groups) — deployed 2026-08-04, live:** added
+    CelesTrak's `visual` group (157 objects live, not just ~100 —
+    optically brightest, includes bright rocket bodies/debris) to
+    `CELESTRAK_GROUP` in `main.tf`. No frontend change needed — the
+    existing starlink-vs-everything-else render split already gives
+    `visual` full interactive treatment. `alert_watchlist` deliberately
+    untouched (still ISS-only) — this is a globe/pass-prediction change,
+    not an alerting one. See DESIGN.md item 13 for the group-overlap
+    (ISS/Tiangong in both `stations` and `visual`) tag-priority note.
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,

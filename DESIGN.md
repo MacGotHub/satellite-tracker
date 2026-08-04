@@ -1040,6 +1040,30 @@ dependency. As-built notes:
     `visual` for a while — `starlink` alone is thousands of objects and is
     the one item on this list that could actually move the DynamoDB
     storage/read needle, unlike everything else here.
+
+    **Done — implemented and verified 2026-08-04, live.** `CELESTRAK_GROUP`
+    widened to `"visual,stations,starlink"` (`main.tf`) — CelesTrak's
+    `visual` group measured **157** objects live at deploy time (optically
+    brightest, including bright rocket bodies/debris, not just active
+    satellites — "~100" was always an approximation). No frontend code
+    change needed: `app.js`'s existing `sat.group === "starlink" ? bulk :
+    interactive` split already routes anything that isn't `starlink` to
+    the full Entity-based interactive path, so `visual` satellites get
+    click/panel/pass-prediction for free. Deliberately did not touch
+    `alert_watchlist` (still ISS-only) — this item widens what the globe
+    tracks and what pass prediction can be run against, not what triggers
+    an SMS/email; that's a separate, more consequential decision. Order
+    matters in the env var: `visual` overlaps `stations` on 2 objects
+    (ISS, Tiangong — both groups list them), and `write_satellites`'s
+    per-group overwrite means whichever group is processed last for a
+    given NORAD ID wins the `group` tag; `visual` is listed first so
+    `stations` (the more specific, correct tag) wins that overwrite. No
+    functional effect today either way — both tags route through the
+    same non-`starlink` render path — but it keeps the tag itself
+    accurate for whenever something *does* read it (item 14's
+    docked-object handling, potentially). Stopped at `visual` per this
+    item's own cost note — `gnss`/`geo`/`starlink`-adjacent groups not
+    added.
 14. **Docked-object handling**, both layers together once #13 lands.
     Alert-side dedupe is already shipped — `alert_watchlist` in
     `locals.tf` is an explicit allow-list of one primary object per

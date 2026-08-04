@@ -203,9 +203,19 @@ resource "aws_lambda_function" "tle_fetcher" {
 
   environment {
     variables = {
-      TABLE_NAME      = aws_dynamodb_table.sattrack.name
-      BUCKET_NAME     = aws_s3_bucket.tle_archive.bucket
-      CELESTRAK_GROUP = "stations,starlink"
+      TABLE_NAME  = aws_dynamodb_table.sattrack.name
+      BUCKET_NAME = aws_s3_bucket.tle_archive.bucket
+      # "visual" (~157 optically-brightest objects incl. rocket bodies,
+      # not just active satellites) added — DESIGN.md backlog item 13.
+      # Order matters here, not just style: "visual" overlaps "stations"
+      # on ISS and Tiangong (both groups list them), and write_satellites
+      # overwrites the same pk/sk per group processed — putting "visual"
+      # first means "stations" (the more specific, correct tag for an
+      # actual space station) wins that overwrite. Stopping at "visual"
+      # deliberately, not proceeding to gnss/geo — see item 13's own
+      # cost note on Starlink-scale groups being the one thing here that
+      # could move the DynamoDB storage/read needle.
+      CELESTRAK_GROUP = "visual,stations,starlink"
     }
   }
 
