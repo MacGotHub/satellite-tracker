@@ -63,6 +63,25 @@ html, body, #globe {
 #panel dd { margin: 0; font-variant-numeric: tabular-nums; }
 
 #passes h3 { margin: 14px 0 4px; font-size: 0.9rem; }
+
+#passes-hero {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+#passes-hero.hero-active {
+  background: rgba(159, 216, 255, 0.12);
+  border: 1px solid #2d4a66;
+  color: #cfe8ff;
+  font-weight: 600;
+}
+#passes-hero.hero-empty {
+  color: #8fa3b8;
+  font-style: italic;
+}
+
 #passes-hint { color: #8fa3b8; font-size: 0.75rem; margin: 0 0 8px; }
 #passes-show-all-label {
   display: flex;

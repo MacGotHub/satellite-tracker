@@ -323,6 +323,7 @@ const panel = document.getElementById("panel");
 const passesList = document.getElementById("passes-list");
 const passesButton = document.getElementById("passes-load");
 const passesShowAllInput = document.getElementById("passes-show-all");
+const passesHeroEl = document.getElementById("passes-hero");
 
 function selectedSat() {
   const entity = viewer.selectedEntity;
@@ -347,6 +348,7 @@ function refreshPanel() {
 
 viewer.selectedEntityChanged.addEventListener(() => {
   passesList.replaceChildren();
+  passesHeroEl.hidden = true; // stale for the newly-selected satellite
   lastComputedPasses = null; // stale for the newly-selected satellite
   refreshPanel(); // immediate on selection change, not throttle-delayed
 });
@@ -559,8 +561,32 @@ function passLabel(p) {
   return p.visible ? base : `${base} — ${VISIBILITY_REASON_LABELS[p.reason] || "not visible"}`;
 }
 
+// DESIGN.md backlog item 9: "next visible pass" is the question users are
+// actually asking — surface it above the full list instead of making them
+// scan for it. Independent of the "show all passes" toggle: the hero always
+// answers the visible-pass question, even while the list below is showing
+// everything.
+function renderHero(passes) {
+  const next = passes.find((p) => p.visible);
+  if (!next) {
+    // Honest empty case, not just silence — visible passes arrive in
+    // clusters separated by weeks, so "none in the window" is routine,
+    // not a sign anything is broken.
+    passesHeroEl.textContent =
+      `No visible passes in the next ${PASS_SEARCH_DAYS} days — visibility ` +
+      `comes in clusters, so this is normal. Check back in a few days.`;
+    passesHeroEl.className = "hero-empty";
+  } else {
+    passesHeroEl.textContent =
+      `Next visible pass: ${passLabel(next)}`;
+    passesHeroEl.className = "hero-active";
+  }
+  passesHeroEl.hidden = false;
+}
+
 function renderPasses(passes) {
   lastComputedPasses = passes;
+  renderHero(passes);
   const showAll = passesShowAllInput.checked;
   const shown = showAll ? passes : passes.filter((p) => p.visible);
 
