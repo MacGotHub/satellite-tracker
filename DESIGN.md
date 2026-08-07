@@ -1107,6 +1107,38 @@ dependency. As-built notes:
    with a one-line explanation that visibility comes in clusters. **If
    Phase 6 lands first:** "once #8 lands" means the JS port above, not
    the API version.
+
+   **Done — implemented and verified 2026-08-06, live.** A new
+   `#passes-hero` element sits between the "Upcoming passes" heading and
+   the existing hint text in `index.html`; `app.js`'s `renderHero()`
+   populates it from the same `passes` array `renderPasses()` already
+   computes — no separate query or propagation pass. Deliberately reads
+   from the *unfiltered* list (`passes.find(p => p.visible)`), not the
+   "show all passes" toggle's filtered view: the hero always answers the
+   visible-pass question even while the list below is showing everything,
+   since those are two different questions ("what's the next one I can
+   see" vs. "show me all the geometry"). Empty case matches the backlog
+   item's exact ask — "No visible passes in the next 14 days — visibility
+   comes in clusters, so this is normal" — styled muted/italic
+   (`.hero-empty`) vs. the found case's highlighted accent box
+   (`.hero-active`), so the honest-empty state doesn't read as an error.
+   Hero clears (`hidden = true`) alongside the existing
+   `passesList`/`lastComputedPasses` reset in the `selectedEntityChanged`
+   handler, so it can't show a stale answer for a satellite that's no
+   longer selected.
+
+   Verified against the real UI, not just read through: no existing dev
+   workflow serves the frontend with live data locally (Item 4's flagged
+   CORS gap blocks a separate-origin dev server from calling
+   `/satellites` at all), so a throwaway same-origin mock server
+   (`http.server` subclass serving `frontend/` plus a hand-rolled
+   `/satellites` response with one real ISS TLE and a `config.js` built
+   from `window.location.origin`) stood in for the deployed CloudFront
+   setup. Selected the ISS via the search box, entered manual observer
+   coordinates, clicked "Predict passes here," and confirmed in-browser:
+   the hero matches pass #1 in the list below, stays fixed when "show all
+   passes" is toggled, and disappears when the entity is deselected.
+   Scratch server and mock TLE were local-only, not committed.
 10. **Sky-arc UI component.** Render each pass as a small chart: azimuth
     along the horizon axis (compass labels), elevation on the vertical
     axis, an arc from rise through peak to set with times marked. Replaces
