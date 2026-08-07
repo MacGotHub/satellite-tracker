@@ -1219,7 +1219,10 @@ dependency. As-built notes:
     14-day window. Observer at 38.9°N (well equatorward of the line)
     correctly hid the note and showed real passes up to 77° peak
     elevation, confirming no false positive for the common case. Console
-    stayed clean throughout.
+    stayed clean throughout. Re-verified live on the deployed CloudFront
+    site after `apply.yml` completed: observer at 75°N against the real
+    ISS TLE showed the note and a genuine zero-passes result, matching
+    the local check.
 13. **Widen the tracked groups (globe, not alerts)** — add CelesTrak
     `visual` group (~100 brightest; these ARE alert candidates) first;
     `starlink`/`gnss`/`geo` later for the globe only. Rules learned up
