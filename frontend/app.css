@@ -93,6 +93,7 @@ html, body, #globe {
   cursor: pointer;
 }
 
+#obs-pin-hint { color: #8fa3b8; font-size: 0.75rem; margin: 0 0 6px; }
 #obs-active { font-size: 0.75rem; color: #9fd8ff; margin: 0 0 8px; }
 
 #obs-manual {

@@ -390,6 +390,28 @@ obsManualForm.addEventListener("submit", (event) => {
   setActiveObserver(lat, lon, "manual");
 });
 
+// DESIGN.md backlog item 11: click-to-drop observer pin. Registered as its
+// own ScreenSpaceEventHandler with a SHIFT modifier rather than overriding
+// the Viewer's plain LEFT_CLICK — Cesium's Viewer already binds unmodified
+// LEFT_CLICK internally for entity selection (that's what makes clicking a
+// satellite work at all), and setInputAction on the same (type, modifier)
+// pair would silently replace it with no way to get the original handler
+// back. A distinct modifier key means the two never collide, and it
+// prevents an ordinary satellite-selection click from being misread as a
+// location change.
+const observerPinHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+observerPinHandler.setInputAction((click) => {
+  const cartesian = viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid);
+  if (!cartesian) return; // click missed the globe (off-limb, into space)
+
+  const carto = Cesium.Cartographic.fromCartesian(cartesian);
+  const lat = Cesium.Math.toDegrees(carto.latitude);
+  const lon = Cesium.Math.toDegrees(carto.longitude);
+  setActiveObserver(lat, lon, "map pin");
+  obsLatInput.value = lat.toFixed(3);
+  obsLonInput.value = lon.toFixed(3);
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK, Cesium.KeyboardEventModifier.SHIFT);
+
 /* ---------- local pass prediction ---------- */
 /* Rise/culminate/set, azimuth, elevation, and (DESIGN.md backlog item 8)
  * a visibility verdict — satellite.js has no find_events() equivalent, so
