@@ -1149,6 +1149,36 @@ dependency. As-built notes:
     Cesium, and the strongest demo moment of the observer-location work.
     Third of the four frontend input paths (after geolocation and manual
     entry, before city search).
+
+    **Done — implemented and verified 2026-08-06, live.** Bound to
+    shift-click, not a plain click — Cesium's `Viewer` already registers
+    its own unmodified `LEFT_CLICK` handler internally (that's the
+    existing satellite-selection behavior), and `setInputAction` on the
+    same `(type, modifier)` pair replaces whatever was already bound
+    there with no public API to recover the original. A distinct
+    `KeyboardEventModifier.SHIFT` registers as a genuinely separate
+    handler instead, so the two can never collide — confirmed live by
+    clicking the ISS entity (still selects normally) immediately before
+    and after adding the pin handler, not just by reasoning about the
+    API. `camera.pickEllipsoid()` turns the click into a
+    `Cartographic`, feeds the existing `setActiveObserver()` (so it gets
+    `localStorage` persistence and the "Observer: ..." status line for
+    free) with a `"map pin"` source label, and also fills the manual
+    lat/lon inputs so the dropped point is visible and hand-editable
+    afterward. Off-globe clicks (into space, past the limb) are a no-op
+    — `pickEllipsoid()` returns `undefined` there, guarded before
+    touching `Cartographic.fromCartesian`. A one-line hint
+    (`#obs-pin-hint`, "shift-click the globe to drop a pin there") sits
+    above the existing observer controls, since the interaction has no
+    other affordance a user would discover on their own.
+
+    Verified against the same throwaway local mock server as item 9 (real
+    ISS TLE, same-origin `/satellites` stub — no dev workflow exists yet
+    for live data against a non-CloudFront origin, per item 4's flagged
+    CORS gap): shift-clicking open ocean set the observer to the clicked
+    lat/lon and updated the manual inputs, a plain click on the ISS point
+    immediately before and after still selected the entity correctly, and
+    console stayed clean.
 12. **Inclination-limit display.** An observer poleward of a satellite's
     inclination never gets a high pass (ISS at 51.6°, Tiangong at ~41.5°).
     No filtering change needed — showing compass bearing and peak
