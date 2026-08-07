@@ -1188,6 +1188,38 @@ dependency. As-built notes:
     No filtering change needed — showing compass bearing and peak
     elevation (already true once #3 lands) makes a permanently-low pass
     legible instead of looking like a bug.
+
+    **Done — implemented and verified 2026-08-07, live.** Item 3's own
+    text (`compass` + peak elevation already in every pass record) turned
+    out to only be half the fix — a user staring at a run of low-elevation
+    passes, or the "no visible passes" empty state, still has to *notice*
+    the pattern and connect it to orbital mechanics themselves. Built the
+    explicit version instead: `maxSubpointLatitudeDeg()` derives the
+    ground track's true latitude extremity from `satrec.inclo` —
+    inclination itself for a prograde orbit (<=90°), `180 - inclination`
+    for a retrograde/sun-synchronous one (a ~98° orbit tops out at 82°
+    latitude, not 98 — got this wrong on the first pass reasoning through
+    it, worth double-checking against a real sun-synchronous TLE if this
+    code changes again). When `abs(observerLat) > maxSubpointLatitudeDeg`,
+    a new `#passes-inclination-note` renders an explicit sentence (e.g.
+    "This satellite's orbit only reaches 51.6° latitude — from 68.0°N,
+    expect passes to stay low on the horizon, if it rises at all.");
+    otherwise it stays hidden, same lifecycle as item 9's hero (computed
+    once per `computeAndRenderPasses()` call, cleared on satellite
+    change). Deliberately a separate element from the hero rather than
+    folded into it — the hero answers "when," this answers "is this
+    combination even geometrically sane," and they can both be true or
+    false independently. No filtering change, matching the backlog item's
+    own framing — every pass is still listed either way.
+
+    Verified against the same local mock server as items 9/11 (real ISS
+    TLE, inclination 51.6416° per its TLE line 2): observer at 68°N, well
+    poleward of that line, correctly triggered the note and matched
+    reality — the list genuinely showed zero passes above 10° in the
+    14-day window. Observer at 38.9°N (well equatorward of the line)
+    correctly hid the note and showed real passes up to 77° peak
+    elevation, confirming no false positive for the common case. Console
+    stayed clean throughout.
 13. **Widen the tracked groups (globe, not alerts)** — add CelesTrak
     `visual` group (~100 brightest; these ARE alert candidates) first;
     `starlink`/`gnss`/`geo` later for the globe only. Rules learned up
