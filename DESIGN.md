@@ -1178,7 +1178,11 @@ dependency. As-built notes:
     CORS gap): shift-clicking open ocean set the observer to the clicked
     lat/lon and updated the manual inputs, a plain click on the ISS point
     immediately before and after still selected the entity correctly, and
-    console stayed clean.
+    console stayed clean. Re-verified the same two checks live on the
+    deployed CloudFront site after `apply.yml` completed — a shift-click
+    set the observer even before any satellite was selected (persisted
+    and displayed correctly once a panel was opened), and a plain click
+    on a rendered point still selected its entity (`PROGRESS-MS 34`).
 12. **Inclination-limit display.** An observer poleward of a satellite's
     inclination never gets a high pass (ISS at 51.6°, Tiangong at ~41.5°).
     No filtering change needed — showing compass bearing and peak
