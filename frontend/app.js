@@ -324,6 +324,7 @@ const passesList = document.getElementById("passes-list");
 const passesButton = document.getElementById("passes-load");
 const passesShowAllInput = document.getElementById("passes-show-all");
 const passesHeroEl = document.getElementById("passes-hero");
+const passesInclinationNoteEl = document.getElementById("passes-inclination-note");
 
 function selectedSat() {
   const entity = viewer.selectedEntity;
@@ -349,6 +350,7 @@ function refreshPanel() {
 viewer.selectedEntityChanged.addEventListener(() => {
   passesList.replaceChildren();
   passesHeroEl.hidden = true; // stale for the newly-selected satellite
+  passesInclinationNoteEl.hidden = true; // stale for the newly-selected satellite
   lastComputedPasses = null; // stale for the newly-selected satellite
   refreshPanel(); // immediate on selection change, not throttle-delayed
 });
@@ -644,11 +646,40 @@ passesShowAllInput.addEventListener("change", () => {
   renderPasses(lastComputedPasses);
 });
 
+// DESIGN.md backlog item 12: a satellite's ground track only ever sweeps
+// between +/-maxLat, where maxLat is the inclination itself for a prograde
+// orbit (inclination <= 90 deg) or 180-inclination for a retrograde one
+// (e.g. a ~98 deg sun-synchronous orbit tops out at 82 deg, not 98). An
+// observer poleward of that line is poleward of the satellite's entire
+// orbit — every pass for them stays low on the horizon, if the satellite
+// clears it at all. That's a fact about the orbit, not a bug in the
+// search, so say so explicitly instead of letting a run of unexplained
+// low-elevation passes read as broken.
+function maxSubpointLatitudeDeg(satrec) {
+  const inclinationDeg = satellite.radiansToDegrees(satrec.inclo);
+  return inclinationDeg <= 90 ? inclinationDeg : 180 - inclinationDeg;
+}
+
+function renderInclinationNote(satrec, observerLatDeg) {
+  const maxLat = maxSubpointLatitudeDeg(satrec);
+  if (Math.abs(observerLatDeg) <= maxLat) {
+    passesInclinationNoteEl.hidden = true;
+    return;
+  }
+  const hemisphere = observerLatDeg >= 0 ? "N" : "S";
+  passesInclinationNoteEl.textContent =
+    `This satellite's orbit only reaches ${maxLat.toFixed(1)}° latitude ` +
+    `— from ${Math.abs(observerLatDeg).toFixed(1)}°${hemisphere}, expect ` +
+    `passes to stay low on the horizon, if it rises at all.`;
+  passesInclinationNoteEl.hidden = false;
+}
+
 const PASSES_BUTTON_DEFAULT_LABEL = "Predict passes here (use my location)";
 
 function computeAndRenderPasses(sat, lat, lon) {
   passesButton.disabled = true;
   passesButton.textContent = "Computing…";
+  renderInclinationNote(sat.satrec, lat);
   // Defer to the next paint so "Computing…" actually becomes visible
   // before the synchronous propagation loop runs — at PASS_SEARCH_DAYS's
   // 14-day window (30s steps, ~40k satellite.propagate() calls) this is
