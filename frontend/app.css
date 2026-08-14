@@ -43,10 +43,9 @@ html, body, #globe {
 }
 #sat-search::placeholder { color: #8fa3b8; }
 
-#panel {
+#panel, #observer {
   position: absolute;
   top: 60px;
-  right: 10px;
   width: 265px;
   max-height: calc(100% - 90px);
   overflow-y: auto;
@@ -56,8 +55,11 @@ html, body, #globe {
   color: #e8f1fa;
   font-size: 0.85rem;
 }
+#panel { right: 10px; }
+#observer { left: 10px; }
 
-#panel h2 { margin: 0 0 8px; font-size: 1rem; color: #9fd8ff; }
+#panel h2, #observer h2 { margin: 0 0 8px; font-size: 1rem; color: #9fd8ff; }
+#observer h3 { margin: 14px 0 4px; font-size: 0.9rem; }
 #panel dl div { display: flex; justify-content: space-between; }
 #panel dt { color: #8fa3b8; }
 #panel dd { margin: 0; font-variant-numeric: tabular-nums; }
@@ -149,4 +151,8 @@ html, body, #globe {
 
 #passes-list { margin: 8px 0 0; padding-left: 18px; }
 #passes-list li { margin-bottom: 8px; line-height: 1.35; }
-#passes-list li.pass-dim { color: #8fa3b8; }
+#passes-list li.pass-dim, #overhead-list li.pass-dim { color: #8fa3b8; }
+
+#overhead-status { color: #8fa3b8; font-size: 0.75rem; margin: 4px 0 0; }
+#overhead-list { margin: 8px 0 0; padding-left: 18px; }
+#overhead-list li { margin-bottom: 8px; line-height: 1.35; }

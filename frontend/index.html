@@ -21,6 +21,27 @@
     </div>
   </header>
 
+  <aside id="observer">
+    <h2>Observer location</h2>
+    <p id="obs-pin-hint">Tip: shift-click the globe to drop a pin there.</p>
+    <p id="obs-active">No observer location set yet.</p>
+
+    <form id="obs-manual">
+      <input id="obs-lat" type="number" step="0.001" min="-90" max="90"
+             placeholder="Latitude" required />
+      <input id="obs-lon" type="number" step="0.001" min="-180" max="180"
+             placeholder="Longitude" required />
+      <button type="submit">Use these coordinates</button>
+    </form>
+
+    <section id="overhead">
+      <h3>Overhead now</h3>
+      <p id="overhead-status">Set your observer location above to see
+        what's overhead right now.</p>
+      <ol id="overhead-list"></ol>
+    </section>
+  </aside>
+
   <aside id="panel" hidden>
     <h2 id="panel-name"></h2>
     <dl>
@@ -39,17 +60,6 @@
         <input type="checkbox" id="passes-show-all" />
         Show all passes, not just visible ones
       </label>
-
-      <p id="obs-pin-hint">Tip: shift-click the globe to drop a pin there.</p>
-      <p id="obs-active">No observer location set yet.</p>
-
-      <form id="obs-manual">
-        <input id="obs-lat" type="number" step="0.001" min="-90" max="90"
-               placeholder="Latitude" required />
-        <input id="obs-lon" type="number" step="0.001" min="-180" max="180"
-               placeholder="Longitude" required />
-        <button type="submit">Use these coordinates</button>
-      </form>
 
       <button id="passes-load">Predict passes here (use my location)</button>
       <ol id="passes-list"></ol>
