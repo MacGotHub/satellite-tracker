@@ -906,8 +906,35 @@ dependency. As-built notes:
    exists for the Phase 4 dedupe flags; reuse it so satellites dropped by
    CelesTrak age out of the catalog instead of lingering with stale
    orbits.
+
+   **Done — implemented and verified 2026-08-14, live.** `write_satellites()`
+   (`src/tle_fetch/handler.py`) now sets `expires_at` (epoch seconds, `now +
+   7 days`) on every item. Because every successful fetch rewrites the full
+   item, a satellite CelesTrak keeps listing gets `expires_at` pushed
+   forward on each ~2h cycle; one CelesTrak drops from a group simply stops
+   being rewritten, and its last-set `expires_at` lets DynamoDB's existing
+   TTL (already enabled table-wide for Phase 4's dedupe flags) clear it
+   within a week instead of it lingering forever with a stale orbit. Test
+   coverage: `test_write_satellites_puts_items_in_dynamodb` asserts
+   `expires_at` lands in the `[now, now] + TLE_TTL_SECONDS` window.
 2. **API Gateway throttling** (e.g. burst 50 / rate 25) — the API is
    public; pairs well with tightening CORS to the CloudFront domain.
+
+   **Already done, undocumented — closed out 2026-08-14.** Found already
+   live in `aws_apigatewayv2_stage.default`'s `default_route_settings`:
+   `throttling_burst_limit = 20`, `throttling_rate_limit = 10` — tighter
+   than this item's own suggested 50/25. Added during the Phase 5 Checkov
+   pass (it's the throttle `CKV_AWS_309`'s inline skip comment on
+   `aws_apigatewayv2_route.api` points to as "the actual abuse control")
+   but never checked off this list — a documentation gap, not a code gap.
+   No change made. The CORS-tightening half stays open: `cors_configuration`
+   is still `allow_origins = ["*"]`; tightening it to the CloudFront domain
+   would introduce a circular resource dependency (the CloudFront
+   distribution's origin needs the API's endpoint, so the API can't in turn
+   depend on the distribution's domain_name for its own CORS config)
+   without restructuring how the two resources reference each other —
+   deliberately left alone here rather than done as a drive-by inside an
+   unrelated throttling item.
 3. **Pass geometry — return the arc, not the apex.** Skyfield's
    `find_events` already yields three events per pass (rise/culminate/set);
    the current implementation keeps only culmination. Compute altitude and
