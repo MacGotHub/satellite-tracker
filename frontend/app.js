@@ -274,6 +274,7 @@ viewer.clock.onTick.addEventListener((clock) => {
   const nowMs = Date.now();
   if (nowMs - lastPanelUpdateMs >= PANEL_THROTTLE_MS) {
     refreshPanel();
+    refreshOverhead(now);
     lastPanelUpdateMs = nowMs;
   }
 });
@@ -722,6 +723,77 @@ passesButton.addEventListener("click", () => {
     { timeout: 10_000 }
   );
 });
+
+/* ---------- overhead now ---------- */
+/* DESIGN.md backlog item 15: "what's above me right now." Answered client-
+ * side, not via a dedicated GET /overhead route — findPassesLocal's own
+ * lookAngles()/classifyVisibility() already do this exact per-instant
+ * elevation/visibility math for the passes panel, so this just re-runs it
+ * against the current clock time instead of a 14-day scan. Scoped to the
+ * named `catalog` (stations + visual, ~180 objects), never the bulk
+ * Starlink swarm — same reasoning as the satellite finder: bulk entries
+ * have no name loaded client-side and would swamp a "what's up" list with
+ * thousands of unlabeled points. */
+
+const OVERHEAD_MIN_ELEVATION_DEG = 10; // same floor as findPassesLocal's default
+const overheadStatusEl = document.getElementById("overhead-status");
+const overheadListEl = document.getElementById("overhead-list");
+
+function refreshOverhead(now) {
+  if (!activeObserver) {
+    overheadListEl.replaceChildren();
+    overheadStatusEl.hidden = false;
+    overheadStatusEl.textContent =
+      "Set your observer location above to see what's overhead right now.";
+    return;
+  }
+
+  const observerGd = {
+    latitude: satellite.degreesToRadians(activeObserver.lat),
+    longitude: satellite.degreesToRadians(activeObserver.lon),
+    height: 0,
+  };
+
+  const overhead = [];
+  for (const sat of catalog.values()) {
+    const look = lookAngles(sat.satrec, now, observerGd);
+    if (!look || look.elevationDeg < OVERHEAD_MIN_ELEVATION_DEG) continue;
+    const { visible, reason } = classifyVisibility(
+      sat.satrec,
+      now,
+      activeObserver.lat,
+      activeObserver.lon
+    );
+    overhead.push({
+      name: sat.name,
+      elevationDeg: look.elevationDeg,
+      azimuthDeg: look.azimuthDeg,
+      visible,
+      reason,
+    });
+  }
+  overhead.sort((a, b) => b.elevationDeg - a.elevationDeg);
+
+  if (overhead.length === 0) {
+    overheadStatusEl.hidden = false;
+    overheadStatusEl.textContent = `Nothing above ${OVERHEAD_MIN_ELEVATION_DEG}° right now.`;
+    overheadListEl.replaceChildren();
+    return;
+  }
+
+  overheadStatusEl.hidden = true;
+  overheadListEl.replaceChildren(
+    ...overhead.map((o) => {
+      const status = o.visible
+        ? "visible now"
+        : VISIBILITY_REASON_LABELS[o.reason] || "not visible";
+      return li(
+        `${o.name} — ${Math.round(o.elevationDeg)}° ${azimuthToCompass(o.azimuthDeg)} · ${status}`,
+        o.visible ? undefined : "pass-dim"
+      );
+    })
+  );
+}
 
 /* ---------- go ---------- */
 
