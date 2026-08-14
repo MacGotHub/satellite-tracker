@@ -72,13 +72,26 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "frontend" {
 
 # Repo files, uploaded as-is. config.js is deliberately absent here — it is
 # generated below from deploy-time values, never committed.
+#
+# cache_control matters here, not just decoration: with no Cache-Control
+# header at all, browsers fall back to RFC 7234 heuristic caching (roughly
+# 10% of an object's Last-Modified age), which for a week-old file can hold
+# a stale app.css/app.js far longer than the 5-minute worst-case staleness
+# the cache policy below documents. Found live 2026-08-14: backlog item 15
+# deployed cleanly (CloudFront itself served the new bytes on a fresh
+# fetch) but a returning browser kept rendering the old CSS from its own
+# disk cache days later. max-age matches aws_cloudfront_cache_policy.frontend's
+# default_ttl so the browser and the CDN edge agree on the same worst-case
+# staleness; must-revalidate forces a real check (not a stale-if-error
+# reuse) once that window expires.
 resource "aws_s3_object" "frontend" {
   for_each = fileset(local.frontend_dir, "**")
 
-  bucket = aws_s3_bucket.frontend.id
-  key    = each.value
-  source = "${local.frontend_dir}/${each.value}"
-  etag   = filemd5("${local.frontend_dir}/${each.value}")
+  bucket        = aws_s3_bucket.frontend.id
+  key           = each.value
+  source        = "${local.frontend_dir}/${each.value}"
+  etag          = filemd5("${local.frontend_dir}/${each.value}")
+  cache_control = "public, max-age=300, must-revalidate"
   content_type = lookup(
     local.frontend_mime_types,
     ".${reverse(split(".", each.value))[0]}",
@@ -87,9 +100,10 @@ resource "aws_s3_object" "frontend" {
 }
 
 resource "aws_s3_object" "frontend_config" {
-  bucket       = aws_s3_bucket.frontend.id
-  key          = "config.js"
-  content_type = "text/javascript"
+  bucket        = aws_s3_bucket.frontend.id
+  key           = "config.js"
+  content_type  = "text/javascript"
+  cache_control = "public, max-age=300, must-revalidate"
   # Phase 6 Step 4: routed through this same CloudFront distribution
   # (see the "apigw-satellites" origin/behavior below) instead of the raw
   # execute-api endpoint, so GET /satellites is CDN-cached and the browser
