@@ -1280,6 +1280,58 @@ dependency. As-built notes:
     instead of a new server route — re-evaluate whether this needs a
     backend endpoint at all once satellite.js is in place.
 
+    **Done — implemented and verified 2026-08-14, live.** Landed exactly
+    as anticipated above: no new route, `refreshOverhead()` in `app.js`
+    re-runs the existing `lookAngles()`/`classifyVisibility()` pair
+    (already written for the passes panel) against the current clock
+    time instead of a 14-day scan, on the same 1s panel-refresh throttle
+    as `refreshPanel()`. Scoped to the named `catalog` only (stations +
+    visual, ~180 objects) — the bulk Starlink swarm has no name loaded
+    client-side and would swamp a "what's up" list with unlabeled
+    points. The observer-location form moved out of the satellite
+    click-panel into its own always-visible `#observer` aside on the
+    left, giving the overhead list a permanent home independent of any
+    selection.
+
+    **Side finding, not caused by this item — found and fixed the same
+    session:** first live-verification pass showed no visible change at
+    all. Root cause wasn't the deploy — `curl` confirmed CloudFront was
+    serving the new bytes immediately — it was the browser's own HTTP
+    cache: `aws_s3_object.frontend` never set a `Cache-Control` header,
+    so with none present browsers fell back to RFC 7234 heuristic
+    freshness instead of the 5-minute worst-case staleness
+    `aws_cloudfront_cache_policy.frontend`'s own comment already assumed.
+    A returning browser kept rendering a week-old `app.css` with no
+    `#observer` positioning rule, so the new panel rendered as an
+    unstyled full-width block pushed below the fold. Fixed by adding
+    `cache_control = "public, max-age=300, must-revalidate"` to both
+    `aws_s3_object.frontend` and `frontend_config`, matching the CDN
+    edge's existing `default_ttl`, in a separate PR — this bug would
+    otherwise have recurred on every future frontend deploy for any
+    returning visitor.
+
+    That fix's own `apply.yml` run hit a second, apparently transient
+    issue: 4 of 5 objects updated cleanly, then `sun.js` failed with
+    `InvalidArgument: Server Side Encryption with AWS KMS managed key
+    requires HTTP header x-amz-server-side-encryption: aws:kms` — despite
+    the bucket's default encryption confirmed as AES256 throughout (`aws
+    s3api get-bucket-encryption`) and no KMS-enforcing bucket policy
+    anywhere (`aws s3api get-bucket-policy` showed only the CloudFront
+    OAC `GetObject` allow). An identical manual `PutObject` succeeded
+    immediately after with no code or config change, so this reads as a
+    one-off S3-side blip, not a real constraint — flagged here in case it
+    recurs, not chased further. Re-running the failed `apply.yml` job
+    came back `0 added, 0 changed, 0 destroyed`, confirming state,
+    live content, and the manual interim fix all agreed.
+
+    Verified correct (not just deployed) after the cache fix: hard
+    reload showed the "Observer location" panel correctly positioned and
+    styled on the left with a live "Overhead now" list (elevation,
+    compass bearing, visibility verdict, updating on the panel's normal
+    tick); clicking a satellite still opened the right-side selection
+    panel with no layout collision between the two; console stayed
+    clean.
+
 ### Harder (external dependencies or multi-part builds)
 
 16. **SATCAT enrichment — "what am I looking at?"** Every object should
