@@ -1,4 +1,5 @@
 import json
+import time
 from unittest.mock import patch
 
 import boto3
@@ -6,6 +7,7 @@ import pytest
 from moto import mock_aws
 
 from src.tle_fetch.handler import (
+    TLE_TTL_SECONDS,
     archive_raw_tle,
     handler,
     parse_tle,
@@ -67,12 +69,17 @@ def test_write_satellites_puts_items_in_dynamodb():
     )
 
     satellites = parse_tle(SAMPLE_TLE)
+    before = int(time.time())
     write_satellites(table, satellites, "2026-07-10T12:00:00+00:00", "stations")
+    after = int(time.time())
 
     item = table.get_item(Key={"pk": "25544", "sk": "TLE"})["Item"]
     assert item["name"] == "ISS (ZARYA)"
     assert item["line1"] == satellites[0]["line1"]
     assert item["group"] == "stations"
+    # expires_at refreshes on every fetch a satellite still appears in —
+    # only satellites CelesTrak stops returning age out, per backlog item 1.
+    assert before + TLE_TTL_SECONDS <= item["expires_at"] <= after + TLE_TTL_SECONDS
 
 
 @mock_aws

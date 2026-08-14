@@ -9,6 +9,15 @@ CELESTRAK_URL_TEMPLATE = (
     "https://celestrak.org/NORAD/elements/gp.php?GROUP={group}&FORMAT=tle"
 )
 
+# DESIGN.md backlog item 1: reuse the table's existing TTL attribute (Phase
+# 4's dedupe flags already rely on it) for TLE items too. Every successful
+# fetch rewrites the full item, so a satellite CelesTrak keeps listing gets
+# its expires_at pushed 7 days out on each ~2h cycle; one CelesTrak drops
+# from a group simply stops being rewritten, and its last-set expires_at
+# lets DynamoDB clear it within a week instead of it lingering forever with
+# a stale orbit.
+TLE_TTL_SECONDS = 7 * 24 * 60 * 60
+
 
 def fetch_tle_text(url: str) -> str:
     with urllib.request.urlopen(url, timeout=10) as response:
@@ -38,6 +47,7 @@ def archive_raw_tle(s3_client, bucket_name, group, raw_text, fetched_at):
 
 
 def write_satellites(table, satellites, fetched_at, group):
+    expires_at = int(datetime.now(timezone.utc).timestamp()) + TLE_TTL_SECONDS
     with table.batch_writer() as batch:
         for sat in satellites:
             batch.put_item(
@@ -49,6 +59,7 @@ def write_satellites(table, satellites, fetched_at, group):
                     "line2": sat["line2"],
                     "fetched_at": fetched_at,
                     "group": group,
+                    "expires_at": expires_at,
                 }
             )
 
