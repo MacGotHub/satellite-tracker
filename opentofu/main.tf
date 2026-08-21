@@ -132,10 +132,23 @@ resource "aws_s3_bucket_lifecycle_configuration" "tle_archive" {
 # the Lambda Python runtime already)
 # -----------------------------------------------
 
+# Two source{} blocks, not source_file/source_dir, since SATCAT enrichment
+# added a sibling module (celestrak_codes.py) — mirrors alerts.tf's
+# handler.py + shared/passes.py pattern so the zip's internal layout
+# matches what "tle_fetch.celestrak_codes" resolves to at runtime.
 data "archive_file" "tle_fetcher" {
   type        = "zip"
-  source_file = "${path.module}/../src/tle_fetch/handler.py"
   output_path = "${path.module}/build/tle_fetcher.zip"
+
+  source {
+    content  = file("${path.module}/../src/tle_fetch/handler.py")
+    filename = "tle_fetch/handler.py"
+  }
+
+  source {
+    content  = file("${path.module}/../src/tle_fetch/celestrak_codes.py")
+    filename = "tle_fetch/celestrak_codes.py"
+  }
 }
 
 # -----------------------------------------------
@@ -188,7 +201,7 @@ resource "aws_iam_role_policy" "tle_fetcher" {
 resource "aws_lambda_function" "tle_fetcher" {
   function_name = "sattrack-tle-fetcher"
   role          = aws_iam_role.tle_fetcher.arn
-  handler       = "handler.handler"
+  handler       = "tle_fetch.handler.handler"
   runtime       = "python3.12"
   # Phase 6 Step 3 added "starlink" (~10,800 satellites) alongside
   # "stations". batch_writer() chunks into groups of 25, so that's ~430

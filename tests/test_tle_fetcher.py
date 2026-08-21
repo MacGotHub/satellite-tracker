@@ -1,5 +1,7 @@
 import json
 import time
+import urllib.error
+from decimal import Decimal
 from unittest.mock import patch
 
 import boto3
@@ -10,8 +12,40 @@ from src.tle_fetch.handler import (
     TLE_TTL_SECONDS,
     archive_raw_tle,
     handler,
+    parse_satcat,
     parse_tle,
     write_satellites,
+)
+
+# Every handler()-level test exercises the real per-group loop, which now
+# always attempts a SATCAT fetch too — patch it to fail fast instead of
+# hitting the network (or CelesTrak's rate policy) during a unit test.
+NO_SATCAT = patch(
+    "src.tle_fetch.handler.fetch_satcat_text",
+    side_effect=urllib.error.URLError("no network in tests"),
+)
+
+SAMPLE_SATCAT_JSON = json.dumps(
+    [
+        {
+            "OBJECT_NAME": "ISS (ZARYA)",
+            "NORAD_CAT_ID": 25544,
+            "OBJECT_TYPE": "PAY",
+            "OWNER": "ISS",
+            "LAUNCH_DATE": "1998-11-20",
+            "DECAY_DATE": "",
+            "RCS": 399.0524,
+        },
+        {
+            "OBJECT_NAME": "SOME DEBRIS",
+            "NORAD_CAT_ID": 694,
+            "OBJECT_TYPE": "DEB",
+            "OWNER": "US",
+            "LAUNCH_DATE": "1975-01-01",
+            "DECAY_DATE": "",
+            "RCS": None,
+        },
+    ]
 )
 
 SAMPLE_TLE = """ISS (ZARYA)
@@ -143,7 +177,7 @@ def test_handler_end_to_end(monkeypatch):
 
     with patch(
         "src.tle_fetch.handler.fetch_tle_text", return_value=SAMPLE_TLE
-    ):
+    ), NO_SATCAT:
         response = handler({}, None)
 
     body = json.loads(response["body"])
@@ -151,6 +185,9 @@ def test_handler_end_to_end(monkeypatch):
     assert body["satellite_count"] == 2
     assert body["groups"] == ["stations"]
     assert body["per_group"] == {"stations": 2}
+    # SATCAT fetch failed for the group — degrades to zero matches, not a
+    # handler-level failure.
+    assert body["satcat_matched"] == {"stations": 0}
 
 
 OTHER_SAMPLE_TLE = """STARLINK-1007
@@ -185,7 +222,7 @@ def test_handler_fetches_and_tags_multiple_groups(monkeypatch):
     def fake_fetch(url):
         return OTHER_SAMPLE_TLE if "GROUP=starlink" in url else SAMPLE_TLE
 
-    with patch("src.tle_fetch.handler.fetch_tle_text", side_effect=fake_fetch):
+    with patch("src.tle_fetch.handler.fetch_tle_text", side_effect=fake_fetch), NO_SATCAT:
         response = handler({}, None)
 
     body = json.loads(response["body"])
@@ -214,3 +251,117 @@ def test_handler_raises_on_empty_tle_response(monkeypatch):
     with patch("src.tle_fetch.handler.fetch_tle_text", return_value=""):
         with pytest.raises(ValueError):
             handler({}, None)
+
+
+def test_parse_satcat_decodes_known_codes_and_pads_norad_id():
+    satcat_by_id = parse_satcat(SAMPLE_SATCAT_JSON)
+
+    # 694, not "00694", comes back from CelesTrak's JSON — parse_satcat has
+    # to zero-pad to match parse_tle()'s zero-padded line1[2:7] keys.
+    assert set(satcat_by_id.keys()) == {"25544", "00694"}
+    assert satcat_by_id["25544"] == {
+        "object_type": "Payload",
+        "owner": "International Space Station",
+        "launch_date": "1998-11-20",
+        "decay_date": None,
+        "rcs": 399.0524,
+    }
+    # RCS null in the source stays None rather than becoming 0 or "null".
+    assert satcat_by_id["00694"]["rcs"] is None
+
+
+def test_parse_satcat_falls_back_to_raw_code_for_unrecognized_values():
+    raw = json.dumps(
+        [
+            {
+                "OBJECT_NAME": "MYSTERY",
+                "NORAD_CAT_ID": 1,
+                "OBJECT_TYPE": "XYZ",
+                "OWNER": "ZZZ",
+                "LAUNCH_DATE": "",
+                "DECAY_DATE": "",
+                "RCS": None,
+            }
+        ]
+    )
+
+    satcat_by_id = parse_satcat(raw)
+
+    # A code CelesTrak adds later that isn't in our table yet should show up
+    # as-is rather than silently disappearing or raising.
+    assert satcat_by_id["00001"]["object_type"] == "XYZ"
+    assert satcat_by_id["00001"]["owner"] == "ZZZ"
+    # Empty-string dates decode to None, same as a genuinely absent value.
+    assert satcat_by_id["00001"]["launch_date"] is None
+
+
+@mock_aws
+def test_write_satellites_merges_satcat_fields_including_decimal_rcs():
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    table = dynamodb.create_table(
+        TableName="test-table",
+        KeySchema=[
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "pk", "AttributeType": "S"},
+            {"AttributeName": "sk", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+    satellites = parse_tle(SAMPLE_TLE)  # ISS (ZARYA)=25544, CSS (TIANHE)=48274
+    satcat_by_id = parse_satcat(SAMPLE_SATCAT_JSON)  # only covers 25544
+    write_satellites(table, satellites, "2026-07-10T12:00:00+00:00", "stations", satcat_by_id)
+
+    iss_item = table.get_item(Key={"pk": "25544", "sk": "TLE"})["Item"]
+    assert iss_item["object_type"] == "Payload"
+    assert iss_item["owner"] == "International Space Station"
+    assert iss_item["launch_date"] == "1998-11-20"
+    assert iss_item["rcs"] == Decimal("399.0524")
+    assert "decay_date" not in iss_item  # empty string decoded to None, omitted
+
+    # No SATCAT match for this one — TLE still writes, just without the
+    # extra attributes, rather than failing the whole satellite.
+    tianhe_item = table.get_item(Key={"pk": "48274", "sk": "TLE"})["Item"]
+    assert "object_type" not in tianhe_item
+    assert "rcs" not in tianhe_item
+
+
+@mock_aws
+def test_handler_merges_satcat_when_fetch_succeeds(monkeypatch):
+    monkeypatch.setenv("TABLE_NAME", "test-table")
+    monkeypatch.setenv("BUCKET_NAME", "test-bucket")
+    monkeypatch.setenv("CELESTRAK_GROUP", "stations")
+
+    s3 = boto3.client("s3", region_name="us-east-1")
+    s3.create_bucket(Bucket="test-bucket")
+
+    dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+    dynamodb.create_table(
+        TableName="test-table",
+        KeySchema=[
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "pk", "AttributeType": "S"},
+            {"AttributeName": "sk", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+    with patch(
+        "src.tle_fetch.handler.fetch_tle_text", return_value=SAMPLE_TLE
+    ), patch(
+        "src.tle_fetch.handler.fetch_satcat_text", return_value=SAMPLE_SATCAT_JSON
+    ):
+        response = handler({}, None)
+
+    body = json.loads(response["body"])
+    assert body["satcat_matched"] == {"stations": 2}
+
+    table = dynamodb.Table("test-table")
+    iss_item = table.get_item(Key={"pk": "25544", "sk": "TLE"})["Item"]
+    assert iss_item["owner"] == "International Space Station"
