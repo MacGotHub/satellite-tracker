@@ -71,6 +71,42 @@ def test_list_satellites(catalog_table):
     ]
 
 
+def test_list_satellites_includes_satcat_fields_when_present(catalog_table):
+    from decimal import Decimal
+
+    catalog_table.put_item(
+        Item={
+            "pk": "48274",
+            "sk": "TLE",
+            "name": "CSS (TIANHE)",
+            "line1": "1 48274U 21035A   26191.50000000  .00025000  00000-0  25000-3 0  9005",
+            "line2": "2 48274  41.4750  10.0000 0001000 100.0000 260.0000 15.60000000123456",
+            "fetched_at": "2026-07-10T12:00:00+00:00",
+            "group": "stations",
+            "object_type": "Payload",
+            "owner": "People's Republic of China",
+            "launch_date": "2021-04-29",
+            "rcs": Decimal("10.5"),
+        }
+    )
+
+    response = api_handler.handler({"routeKey": "GET /satellites"}, None)
+
+    body = json.loads(response["body"])
+    tianhe = next(s for s in body["satellites"] if s["id"] == "48274")
+    assert tianhe["object_type"] == "Payload"
+    assert tianhe["owner"] == "People's Republic of China"
+    assert tianhe["launch_date"] == "2021-04-29"
+    assert tianhe["rcs"] == 10.5
+    assert "decay_date" not in tianhe  # never set on this item, stays absent
+
+    # The ISS fixture item has no SATCAT fields at all (pre-enrichment
+    # shape) — must serialize cleanly without them, not KeyError or null-pad.
+    iss = next(s for s in body["satellites"] if s["id"] == "25544")
+    assert "object_type" not in iss
+    assert "rcs" not in iss
+
+
 def test_list_satellites_defaults_group_for_untagged_items(catalog_table):
     # Items written before Phase 6 Step 3 added group-tagging won't have
     # the attribute until their next 2h refresh — must not KeyError.
