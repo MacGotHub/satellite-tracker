@@ -21,50 +21,55 @@
     </div>
   </header>
 
-  <aside id="observer">
-    <h2>Observer location</h2>
-    <p id="obs-pin-hint">Tip: shift-click the globe to drop a pin there.</p>
-    <p id="obs-active">No observer location set yet.</p>
+  <!-- Both panels anchor top-right and stack vertically (see app.css) so
+       overhead-now stays visible above the per-satellite detail panel
+       instead of the two competing for the same spot. -->
+  <div id="right-stack">
+    <aside id="observer">
+      <h2>Observer location</h2>
+      <p id="obs-pin-hint">Tip: shift-click the globe to drop a pin there.</p>
+      <p id="obs-active">No observer location set yet.</p>
 
-    <form id="obs-manual">
-      <input id="obs-lat" type="number" step="0.001" min="-90" max="90"
-             placeholder="Latitude" required />
-      <input id="obs-lon" type="number" step="0.001" min="-180" max="180"
-             placeholder="Longitude" required />
-      <button type="submit">Use these coordinates</button>
-    </form>
+      <form id="obs-manual">
+        <input id="obs-lat" type="number" step="0.001" min="-90" max="90"
+               placeholder="Latitude" required />
+        <input id="obs-lon" type="number" step="0.001" min="-180" max="180"
+               placeholder="Longitude" required />
+        <button type="submit">Use these coordinates</button>
+      </form>
 
-    <section id="overhead">
-      <h3>Overhead now</h3>
-      <p id="overhead-status">Set your observer location above to see
-        what's overhead right now.</p>
-      <ol id="overhead-list"></ol>
-    </section>
-  </aside>
+      <section id="overhead">
+        <h3>Overhead now</h3>
+        <p id="overhead-status">Set your observer location above to see
+          what's overhead right now.</p>
+        <ol id="overhead-list"></ol>
+      </section>
+    </aside>
 
-  <aside id="panel" hidden>
-    <h2 id="panel-name"></h2>
-    <dl>
-      <div><dt>Latitude</dt><dd id="panel-lat"></dd></div>
-      <div><dt>Longitude</dt><dd id="panel-lon"></dd></div>
-      <div><dt>Altitude</dt><dd id="panel-alt"></dd></div>
-    </dl>
-    <section id="passes">
-      <h3>Upcoming passes</h3>
-      <p id="passes-hero" hidden></p>
-      <p id="passes-inclination-note" hidden></p>
-      <p id="passes-hint">Computed in your browser from this satellite's
-        orbit — shows every visible pass above 10° elevation in the next
-        14 days (satellite sunlit, sky dark enough to see it).</p>
-      <label id="passes-show-all-label">
-        <input type="checkbox" id="passes-show-all" />
-        Show all passes, not just visible ones
-      </label>
+    <aside id="panel" hidden>
+      <h2 id="panel-name"></h2>
+      <dl>
+        <div><dt>Latitude</dt><dd id="panel-lat"></dd></div>
+        <div><dt>Longitude</dt><dd id="panel-lon"></dd></div>
+        <div><dt>Altitude</dt><dd id="panel-alt"></dd></div>
+      </dl>
+      <section id="passes">
+        <h3>Upcoming passes</h3>
+        <p id="passes-hero" hidden></p>
+        <p id="passes-inclination-note" hidden></p>
+        <p id="passes-hint">Computed in your browser from this satellite's
+          orbit — shows every visible pass above 10° elevation in the next
+          14 days (satellite sunlit, sky dark enough to see it).</p>
+        <label id="passes-show-all-label">
+          <input type="checkbox" id="passes-show-all" />
+          Show all passes, not just visible ones
+        </label>
 
-      <button id="passes-load">Predict passes here (use my location)</button>
-      <ol id="passes-list"></ol>
-    </section>
-  </aside>
+        <button id="passes-load">Predict passes here (use my location)</button>
+        <ol id="passes-list"></ol>
+      </section>
+    </aside>
+  </div>
 
   <!-- config.js is generated at deploy time by OpenTofu (API URL + optional
        Cesium ion token) — it is intentionally not in the repo. -->
