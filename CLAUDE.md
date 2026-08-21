@@ -433,6 +433,45 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     unaffected (not served via CloudFront). Full incident writeup in
     DESIGN.md item 8 — worth reading before adding any new file to the
     frontend bucket in the future.
+  - **UI layout — deployed 2026-08-20/21, live:** `#observer` (overhead-now)
+    and `#panel` (per-satellite detail/passes) moved off a fixed left/right
+    split into a shared `#right-stack` flex column, both anchored top-right
+    so the two never compete for screen space; `#observer` also gained a
+    standalone "Use my location" button (geolocation previously only
+    existed indirectly, via the per-satellite passes panel's button).
+  - **SATCAT metadata enrichment — deployed 2026-08-21, live:** the bare
+    catalog name previously left users to research every satellite
+    themselves. `sattrack-tle-fetcher` now also queries CelesTrak's SATCAT
+    endpoint (`records.php?GROUP=<group>&FORMAT=json`) per group, same
+    per-group loop and 2h cadence as the existing TLE fetch, and merges
+    `object_type`/`owner`/`launch_date`/`decay_date`/`rcs` onto the same
+    `TLE` item (not a new `sk` — 1:1 with the satellite, changes rarely,
+    no reason to pay for a second item or a join on read). Best-effort
+    and isolated per group: a SATCAT outage logs and skips enrichment for
+    that cycle rather than blocking the TLE write. `OBJECT_TYPE`/`OWNER`
+    codes are decoded via `src/tle_fetch/celestrak_codes.py`, transcribed
+    from CelesTrak's own published references (satcat-format.php,
+    sources.php), falling back to the raw code for anything unrecognized
+    rather than guessing. `sattrack-api` serializes the new fields when
+    present (not null-padded) and casts `rcs` from DynamoDB's `Decimal` to
+    `float`. The frontend detail panel shows them as a new `#panel-facts`
+    line above the existing hand-curated `satellite_info.js` blurbs
+    (~13 well-known crewed-station spacecraft, added the same session)
+    — objective facts for (eventually) the whole catalog including all
+    ~10,769 Starlinks, editorial sentence layered on top for the ones
+    worth one. Verified live end-to-end: manually invoked
+    `sattrack-tle-fetcher` post-deploy rather than waiting for its next
+    2h tick, confirmed via `GetItem` (ISS → Payload/International Space
+    Station/1998-11-20, an Ariane 40 R/B → Rocket Body/France) and via
+    `GET /satellites` through the real CloudFront route the frontend uses.
+    Gotcha worth knowing before adding another sibling module to
+    `src/tle_fetch/`: that Lambda's `archive_file` used to be a single
+    `source_file` (just `handler.py`, flat at the zip root, `handler =
+    "handler.handler"`) — adding `celestrak_codes.py` required switching
+    to the same multi-`source{}` block pattern `alerts.tf` already uses
+    for `handler.py` + `shared/passes.py`, with a matching
+    `"tle_fetch.handler.handler"` entrypoint; otherwise the new file
+    silently isn't in the deployed zip at all.
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
