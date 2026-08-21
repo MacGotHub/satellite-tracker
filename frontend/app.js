@@ -363,6 +363,8 @@ const obsActiveEl = document.getElementById("obs-active");
 const obsManualForm = document.getElementById("obs-manual");
 const obsLatInput = document.getElementById("obs-lat");
 const obsLonInput = document.getElementById("obs-lon");
+const obsGeolocateButton = document.getElementById("obs-geolocate");
+const OBS_GEOLOCATE_DEFAULT_LABEL = obsGeolocateButton.textContent;
 
 let activeObserver = null; // { lat, lon, source }
 
@@ -391,6 +393,32 @@ obsManualForm.addEventListener("submit", (event) => {
   const lon = parseFloat(obsLonInput.value);
   if (Number.isNaN(lat) || Number.isNaN(lon)) return;
   setActiveObserver(lat, lon, "manual");
+});
+
+// Standalone geolocation entry point for the observer panel — previously
+// the only way to get a browser-detected location was indirectly, via a
+// selected satellite's "Predict passes here" button.
+obsGeolocateButton.addEventListener("click", () => {
+  obsGeolocateButton.disabled = true;
+  obsGeolocateButton.textContent = "Locating…";
+
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      const { latitude, longitude } = pos.coords;
+      setActiveObserver(latitude, longitude, "browser");
+      obsLatInput.value = latitude.toFixed(3);
+      obsLonInput.value = longitude.toFixed(3);
+      obsGeolocateButton.disabled = false;
+      obsGeolocateButton.textContent = OBS_GEOLOCATE_DEFAULT_LABEL;
+    },
+    () => {
+      obsActiveEl.textContent =
+        "Location permission needed — or enter coordinates below.";
+      obsGeolocateButton.disabled = false;
+      obsGeolocateButton.textContent = OBS_GEOLOCATE_DEFAULT_LABEL;
+    },
+    { timeout: 10_000 }
+  );
 });
 
 // DESIGN.md backlog item 11: click-to-drop observer pin. Registered as its
