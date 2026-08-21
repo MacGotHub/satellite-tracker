@@ -1389,6 +1389,67 @@ dependency. As-built notes:
       are sparse, so it supplements the curated table rather than
       replacing it. Attribution required: "Data from J. McDowell,
       planet4589.org".
+
+    **Done — implemented and verified 2026-08-21, live, differently from
+    the spec above in two deliberate ways.** No separate `satcat-sync`
+    Lambda or S3 cache: `tle_fetch` queries
+    `celestrak.org/satcat/records.php?GROUP=<group>&FORMAT=json` inline,
+    per group, on the same per-group loop and existing 2h schedule as the
+    TLE fetch itself — SATCAT's own per-object change rate doesn't need a
+    separate weekly cadence when the join is this cheap to just run every
+    cycle, and one Lambda/one schedule beats a second moving part for a
+    personal project. Enrichment attributes (`object_type`, `owner`,
+    `launch_date`, `decay_date`, `rcs`) land as additive attributes on the
+    existing `TLE` item, exactly as spec'd — no key-schema change, no new
+    `sk`. `OBJECT_TYPE`/`OWNER` codes decoded via a table transcribed
+    directly from CelesTrak's own published references
+    (`src/tle_fetch/celestrak_codes.py`: `satcat-format.php` for the type
+    codes, `sources.php`'s full ~130-entry table for owner codes),
+    falling back to the raw code for anything unrecognized rather than
+    guessing — the "no LLM-invented descriptions" rule above, satisfied
+    by construction rather than a review step. Best-effort and isolated
+    per group: a SATCAT outage logs and skips enrichment for that cycle
+    without blocking the TLE write it rides alongside.
+
+    The curated `description` layer shipped smaller and earlier than
+    spec'd: `frontend/satellite_info.js` (same session, just before this
+    item) hand-curates ~13 well-known crewed-station spacecraft rather
+    than the ~50 originally scoped, and there is no deterministic
+    SATCAT-field template as a second tier — the real fields render
+    directly in a new `#panel-facts` line (e.g. "Payload · International
+    Space Station · Launched 1998-11-20"), with the curated sentence
+    layered underneath when one exists, rather than synthesizing prose
+    from the fields. `src/api/handler.py` serializes the new fields only
+    when present (not null-padded) and casts `rcs` from DynamoDB's
+    `Decimal` to `float`, since `json.dumps()` rejects `Decimal` directly.
+
+    GCAT is not implemented — still an optional later layer, unchanged
+    from the original scope.
+
+    Verified live end-to-end, not just deployed: manually invoked
+    `sattrack-tle-fetcher` post-deploy rather than waiting for its next
+    2h tick (10,924 satellites fetched, SATCAT matched across all three
+    groups), then confirmed via `GetItem` that ISS (25544) picked up
+    `object_type: Payload`, `owner: International Space Station`,
+    `launch_date: 1998-11-20`, `rcs: 399.0524`, and that an Ariane 40
+    rocket body (21610) correctly decoded to `Rocket Body`/`France` —
+    and via `GET /satellites` through the real CloudFront route the
+    frontend uses, confirming the API and cache layer both carry the new
+    fields through unchanged.
+
+    **Gotcha worth knowing before adding another sibling module to
+    `src/tle_fetch/`:** that Lambda's `archive_file` used to be a single
+    `source_file` (just `handler.py`, flat at the zip root, `handler =
+    "handler.handler"`) — adding `celestrak_codes.py` as a second file
+    required switching to the same multi-`source{}` block pattern
+    `alerts.tf` already uses for `handler.py` + `shared/passes.py`, with
+    a matching `"tle_fetch.handler.handler"` entrypoint. Missing either
+    half of that change means the new file silently isn't in the
+    deployed zip, or the import path used inside `handler.py`
+    (`from tle_fetch.celestrak_codes import ...`, matching how `alerts`
+    imports `from shared.passes import ...`) doesn't resolve at runtime
+    even though it resolves fine locally under pytest's `pythonpath = .
+    src`.
 17. **City search geocoder** — last of the four frontend observer-input
     paths, deliberately sequenced last because it needs a geocoder
     dependency. **Cost/privacy flag:** unlike everything else on this
