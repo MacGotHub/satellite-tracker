@@ -70,8 +70,14 @@ html, body, #globe {
 }
 
 #panel h2, #observer h2 { margin: 0 0 8px; font-size: 1rem; color: #9fd8ff; }
+#panel-facts {
+  margin: -4px 0 6px;
+  color: #9fd8ff;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
 #panel-blurb {
-  margin: -4px 0 10px;
+  margin: 0 0 10px;
   color: #8fa3b8;
   font-size: 0.78rem;
   line-height: 1.35;

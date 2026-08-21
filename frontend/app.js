@@ -135,7 +135,19 @@ async function refreshCatalog() {
         if (sat.group === "starlink") {
           bulkCatalog.push({ id: sat.id, satrec });
         } else {
-          catalog.set(sat.id, { id: sat.id, name: sat.name, satrec });
+          catalog.set(sat.id, {
+            id: sat.id,
+            name: sat.name,
+            satrec,
+            // SATCAT enrichment (src/tle_fetch): only present once a
+            // satellite's group has had a successful SATCAT fetch, so
+            // these are frequently undefined — refreshPanel treats them
+            // as optional, not a fallback-to-empty-string situation.
+            objectType: sat.object_type,
+            owner: sat.owner,
+            launchDate: sat.launch_date,
+            decayDate: sat.decay_date,
+          });
         }
       } catch (err) {
         // One bad TLE shouldn't blank the whole globe. Starlink's
@@ -322,6 +334,7 @@ searchInput.addEventListener("change", () => {
 /* ---------- selection panel ---------- */
 
 const panel = document.getElementById("panel");
+const panelFactsEl = document.getElementById("panel-facts");
 const panelBlurbEl = document.getElementById("panel-blurb");
 const passesList = document.getElementById("passes-list");
 const passesButton = document.getElementById("passes-load");
@@ -345,6 +358,19 @@ function refreshPanel() {
 
   panel.hidden = false;
   document.getElementById("panel-name").textContent = sat.name;
+
+  // Real SATCAT facts (when this satellite's group has them yet) above the
+  // hand-curated blurb (when we have one) — objective data first, editorial
+  // sentence second.
+  const facts = [
+    sat.objectType,
+    sat.owner,
+    sat.launchDate && `Launched ${sat.launchDate}`,
+    sat.decayDate && `Decayed ${sat.decayDate}`,
+  ].filter(Boolean);
+  panelFactsEl.hidden = facts.length === 0;
+  panelFactsEl.textContent = facts.join(" · ");
+
   const blurb = getSatelliteBlurb(sat.name);
   panelBlurbEl.hidden = !blurb;
   panelBlurbEl.textContent = blurb || "";
