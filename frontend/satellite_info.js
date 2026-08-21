@@ -55,3 +55,44 @@ export function getSatelliteBlurb(name) {
   const match = PATTERN_BLURBS.find(({ pattern }) => pattern.test(name));
   return match ? match.blurb : null;
 }
+
+// DESIGN.md backlog item 14: docked/attached-object handling, frontend
+// half (the alert side was already correctly scoped to ISS-only from day
+// one — nothing to change there). Same confidence bar as KNOWN_BLURBS
+// above: only pairs we can actually verify, not "everything CelesTrak's
+// stations group happens to include" — that group also carries genuinely
+// independent small satellites and debris (e.g. deployed-from-ISS
+// cubesats) that just share a similar orbit, not a docked one, and
+// tagging those would be flatly wrong. Manually maintained — real docking
+// status changes over weeks/months as vehicles arrive and depart, so this
+// will drift and needs occasional review, same as the blurbs.
+const HOST_STATION = {
+  "ISS (NAUKA)": "ISS (ZARYA)",
+  POISK: "ISS (ZARYA)",
+  "CSS (WENTIAN)": "CSS (TIANHE)",
+  "CSS (MENGTIAN)": "CSS (TIANHE)",
+  "CYGNUS NG-24": "ISS (ZARYA)",
+  "CREW DRAGON 12": "ISS (ZARYA)",
+  "PROGRESS-MS 33": "ISS (ZARYA)",
+  "PROGRESS-MS 34": "ISS (ZARYA)",
+  "SOYUZ-MS 28": "ISS (ZARYA)",
+  "SHENZHOU-23 (SZ-23)": "CSS (TIANHE)",
+  "TIANZHOU-10": "CSS (TIANHE)",
+};
+
+// Derived, not hand-maintained separately — one source of truth (the map
+// above) backs both the "what am I docked to" and "what's docked to me"
+// directions, so they can't drift out of sync with each other even though
+// the underlying facts still need periodic human review.
+const DOCKED_AT = {};
+for (const [name, host] of Object.entries(HOST_STATION)) {
+  (DOCKED_AT[host] ??= []).push(name);
+}
+
+export function getHostStation(name) {
+  return HOST_STATION[name] || null;
+}
+
+export function getDockedObjects(name) {
+  return DOCKED_AT[name] || [];
+}
