@@ -12,6 +12,7 @@
 
 import * as satellite from "https://cdn.jsdelivr.net/npm/satellite.js@7.1.0/+esm";
 import { sunPosition, sunAltitudeDeg, isSunlit } from "./sun.js";
+import { getSatelliteBlurb } from "./satellite_info.js";
 
 const config = window.SATTRACK_CONFIG || {};
 const API = (config.apiBaseUrl || "").replace(/\/$/, "");
@@ -321,6 +322,7 @@ searchInput.addEventListener("change", () => {
 /* ---------- selection panel ---------- */
 
 const panel = document.getElementById("panel");
+const panelBlurbEl = document.getElementById("panel-blurb");
 const passesList = document.getElementById("passes-list");
 const passesButton = document.getElementById("passes-load");
 const passesShowAllInput = document.getElementById("passes-show-all");
@@ -343,6 +345,9 @@ function refreshPanel() {
 
   panel.hidden = false;
   document.getElementById("panel-name").textContent = sat.name;
+  const blurb = getSatelliteBlurb(sat.name);
+  panelBlurbEl.hidden = !blurb;
+  panelBlurbEl.textContent = blurb || "";
   document.getElementById("panel-lat").textContent = `${pos.lat.toFixed(2)}°`;
   document.getElementById("panel-lon").textContent = `${pos.lon.toFixed(2)}°`;
   document.getElementById("panel-alt").textContent = `${pos.alt_km.toFixed(0)} km`;
