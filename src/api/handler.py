@@ -17,6 +17,12 @@ import boto3
 
 _table = None
 
+# Optional SATCAT enrichment attributes (src/tle_fetch/handler.py) — only
+# present once a satellite's group has had at least one successful SATCAT
+# fetch, so these ride along when present rather than padding every
+# response with nulls for satellites that don't have them yet.
+_OPTIONAL_SATCAT_FIELDS = ("object_type", "owner", "launch_date", "decay_date")
+
 
 def _catalog_table():
     global _table
@@ -54,20 +60,30 @@ def _response(status: int, body) -> dict:
     }
 
 
+def _serialize_satellite(item: dict) -> dict:
+    satellite = {
+        "id": item["pk"],
+        "name": item["name"],
+        "tle_fetched_at": item["fetched_at"],
+        "line1": item["line1"],
+        "line2": item["line2"],
+        # Default covers items written before Phase 6 Step 3 tagged
+        # them by source group — self-heals on their next 2h refresh.
+        "group": item.get("group", "stations"),
+    }
+    for field in _OPTIONAL_SATCAT_FIELDS:
+        if field in item:
+            satellite[field] = item[field]
+    if "rcs" in item:
+        # DynamoDB returns Number attributes as Decimal — json.dumps()
+        # raises on that type directly, so cast explicitly rather than
+        # reaching for a custom encoder for one field.
+        satellite["rcs"] = float(item["rcs"])
+    return satellite
+
+
 def _list_satellites(event) -> dict:
-    satellites = [
-        {
-            "id": item["pk"],
-            "name": item["name"],
-            "tle_fetched_at": item["fetched_at"],
-            "line1": item["line1"],
-            "line2": item["line2"],
-            # Default covers items written before Phase 6 Step 3 tagged
-            # them by source group — self-heals on their next 2h refresh.
-            "group": item.get("group", "stations"),
-        }
-        for item in _scan_catalog()
-    ]
+    satellites = [_serialize_satellite(item) for item in _scan_catalog()]
     satellites.sort(key=lambda s: s["name"])
     return _response(200, {"satellites": satellites})
 
