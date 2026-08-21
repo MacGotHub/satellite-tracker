@@ -118,6 +118,19 @@ html, body, #globe {
   cursor: pointer;
 }
 
+#obs-geolocate {
+  width: 100%;
+  padding: 6px;
+  margin: 0 0 8px;
+  border: 1px solid #2d4a66;
+  border-radius: 6px;
+  background: #17324d;
+  color: #cfe8ff;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+#obs-geolocate:hover { background: #1d4066; }
+
 #obs-pin-hint { color: #8fa3b8; font-size: 0.75rem; margin: 0 0 6px; }
 #obs-active { font-size: 0.75rem; color: #9fd8ff; margin: 0 0 8px; }
 
