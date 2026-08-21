@@ -12,7 +12,11 @@
 
 import * as satellite from "https://cdn.jsdelivr.net/npm/satellite.js@7.1.0/+esm";
 import { sunPosition, sunAltitudeDeg, isSunlit } from "./sun.js";
-import { getSatelliteBlurb } from "./satellite_info.js";
+import {
+  getSatelliteBlurb,
+  getDockedObjects,
+  getHostStation,
+} from "./satellite_info.js";
 
 const config = window.SATTRACK_CONFIG || {};
 const API = (config.apiBaseUrl || "").replace(/\/$/, "");
@@ -335,6 +339,7 @@ searchInput.addEventListener("change", () => {
 
 const panel = document.getElementById("panel");
 const panelFactsEl = document.getElementById("panel-facts");
+const panelDockingEl = document.getElementById("panel-docking");
 const panelBlurbEl = document.getElementById("panel-blurb");
 const passesList = document.getElementById("passes-list");
 const passesButton = document.getElementById("passes-load");
@@ -370,6 +375,21 @@ function refreshPanel() {
   ].filter(Boolean);
   panelFactsEl.hidden = facts.length === 0;
   panelFactsEl.textContent = facts.join(" · ");
+
+  // DESIGN.md backlog item 14: a docked vehicle/module and its host
+  // station trace the same arc — this line is why that's not a rendering
+  // bug. hostStation and dockedObjects are mutually exclusive by
+  // construction (satellite_info.js derives one map from the other).
+  const hostStation = getHostStation(sat.name);
+  const dockedObjects = getDockedObjects(sat.name);
+  let dockingText = "";
+  if (hostStation) {
+    dockingText = `Shares an orbit with ${hostStation}`;
+  } else if (dockedObjects.length > 0) {
+    dockingText = `Currently docked: ${dockedObjects.join(", ")}`;
+  }
+  panelDockingEl.hidden = !dockingText;
+  panelDockingEl.textContent = dockingText;
 
   const blurb = getSatelliteBlurb(sat.name);
   panelBlurbEl.hidden = !blurb;

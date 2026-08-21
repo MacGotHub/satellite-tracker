@@ -76,6 +76,12 @@ html, body, #globe {
   font-size: 0.75rem;
   line-height: 1.35;
 }
+#panel-docking {
+  margin: 0 0 6px;
+  color: #9fd8ff;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
 #panel-blurb {
   margin: 0 0 10px;
   color: #8fa3b8;
