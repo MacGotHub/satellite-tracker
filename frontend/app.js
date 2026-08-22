@@ -536,6 +536,62 @@ function classifyVisibility(satrec, peakTime, observerLatDeg, observerLonDeg) {
   return { visible: true, reason: null };
 }
 
+// DESIGN.md roadmap: relative brightness ranking, not an absolute
+// magnitude estimate. A real visual-magnitude number needs an assumed
+// albedo/shape (typically a Lambertian sphere derived from RCS) that the
+// published photometry literature itself documents as unreliable for real
+// satellites — especially flat-panel/shiny ones — so this deliberately
+// stops short of asserting a number. What IS well-founded: for the SAME
+// satellite, brightness scales with the Lambertian phase function over
+// range squared, and the unknown albedo/size/reflectivity terms are
+// constant multipliers that cancel out entirely when comparing one pass
+// against another pass of that same object. That's a legitimate relative
+// ranking, not a guess — it just can't say how bright in absolute terms.
+//
+// phase = Sun-satellite-observer angle. Observer position has to be in
+// the same ECI frame as the satellite (posVel.position) and the Sun
+// direction (sun.js's unitVector) — satellite.js's own eciToEcf/
+// ecfToEci/geodeticToEcf trio (not guessed; confirmed against its
+// documented API) makes that conversion explicit rather than
+// approximating the observer as being at Earth's center.
+function relativeBrightnessScore(satrec, peakTime, observerGd) {
+  const posVel = satellite.propagate(satrec, peakTime);
+  if (!hasValidPosition(posVel)) return null;
+
+  const gmst = satellite.gstime(peakTime);
+  const observerEcf = satellite.geodeticToEcf(observerGd);
+  const observerEci = satellite.ecfToEci(observerEcf, gmst);
+
+  const sat = posVel.position;
+  const toObserver = {
+    x: observerEci.x - sat.x,
+    y: observerEci.y - sat.y,
+    z: observerEci.z - sat.z,
+  };
+  const rangeKm = Math.sqrt(
+    toObserver.x * toObserver.x + toObserver.y * toObserver.y + toObserver.z * toObserver.z
+  );
+  if (rangeKm === 0) return null;
+
+  const sun = sunPosition(peakTime);
+  const s = sun.unitVector; // satellite-to-sun ≈ Earth-to-sun direction; 1 AU dwarfs LEO altitude
+  const cosPhase = Math.min(
+    1,
+    Math.max(
+      -1,
+      (toObserver.x * s.x + toObserver.y * s.y + toObserver.z * s.z) / rangeKm
+    )
+  );
+  const phaseAngle = Math.acos(cosPhase);
+
+  // Lambertian-sphere phase function shape only (Cognion et al., "Large
+  // phase angle observations of GEO satellites") — the constant
+  // reflectivity/albedo factor this formula also carries is exactly what
+  // cancels out in a same-object comparison, so it's dropped here.
+  const phaseFn = Math.sin(phaseAngle) + (Math.PI - phaseAngle) * Math.cos(phaseAngle);
+  return phaseFn / (rangeKm * rangeKm);
+}
+
 function lookAngles(satrec, date, observerGd) {
   const posVel = satellite.propagate(satrec, date);
   if (!hasValidPosition(posVel)) return null;
@@ -614,6 +670,11 @@ function findPassesLocal(
           direction: azimuthToCompass(peak.azimuthDeg),
           visible,
           reason,
+          // Only meaningful for a visible pass — an eclipsed/daylight one
+          // has no illumination-vs-illumination comparison to make.
+          brightness_score: visible
+            ? relativeBrightnessScore(satrec, peak.time, observerGd)
+            : null,
         });
       }
       current = null;
@@ -640,11 +701,30 @@ function li(text, className) {
 // (computed, genuinely zero passes) matter differently to the "show all"
 // toggle handler below — keep them distinguishable, don't collapse to [].
 let lastComputedPasses = null;
+let lastComputedSatName = null; // for the brightness label's "...for X" — re-render on toggle needs it too
 
 const VISIBILITY_REASON_LABELS = {
   daylight: "daylight",
   eclipsed: "satellite in shadow",
 };
+
+function median(numbers) {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+// Relative only — "brighter/dimmer than this same satellite's other passes
+// in the window," never an absolute magnitude. Needs at least 2 scored
+// passes to have a "typical" to compare against.
+function brightnessLabel(pass, typicalScore, satName) {
+  if (!pass.visible || pass.brightness_score == null || typicalScore == null) {
+    return null;
+  }
+  return pass.brightness_score >= typicalScore
+    ? `Brighter than typical for ${satName}`
+    : `Dimmer than typical for ${satName}`;
+}
 
 function passLabel(p) {
   // month/day, not just weekday: over a multi-week window "Mon" alone is
@@ -688,8 +768,9 @@ function renderHero(passes) {
   passesHeroEl.hidden = false;
 }
 
-function renderPasses(passes) {
+function renderPasses(passes, satName) {
   lastComputedPasses = passes;
+  lastComputedSatName = satName;
   renderHero(passes);
   const showAll = passesShowAllInput.checked;
   const shown = showAll ? passes : passes.filter((p) => p.visible);
@@ -714,8 +795,26 @@ function renderPasses(passes) {
     );
     return;
   }
+
+  // Needs at least 2 visible, scored passes to have a "typical" to compare
+  // against — with 0 or 1, every pass would trivially be "typical."
+  const scores = passes
+    .map((p) => p.brightness_score)
+    .filter((s) => s != null);
+  const typicalScore = scores.length >= 2 ? median(scores) : null;
+
   passesList.replaceChildren(
-    ...shown.map((p) => li(passLabel(p), p.visible ? undefined : "pass-dim"))
+    ...shown.map((p) => {
+      const item = li(passLabel(p), p.visible ? undefined : "pass-dim");
+      const brightness = brightnessLabel(p, typicalScore, satName);
+      if (brightness) {
+        const span = document.createElement("span");
+        span.className = "pass-brightness";
+        span.textContent = brightness;
+        item.appendChild(span);
+      }
+      return item;
+    })
   );
 }
 
@@ -723,7 +822,7 @@ function renderPasses(passes) {
 // to 14-day) propagation scan just to flip a display filter.
 passesShowAllInput.addEventListener("change", () => {
   if (lastComputedPasses === null) return; // nothing computed yet
-  renderPasses(lastComputedPasses);
+  renderPasses(lastComputedPasses, lastComputedSatName);
 });
 
 // DESIGN.md backlog item 12: a satellite's ground track only ever sweeps
@@ -766,7 +865,7 @@ function computeAndRenderPasses(sat, lat, lon) {
   // long enough to freeze the tab for a moment without this, which read
   // as a hang rather than a computation in progress.
   requestAnimationFrame(() => {
-    renderPasses(findPassesLocal(sat.satrec, lat, lon));
+    renderPasses(findPassesLocal(sat.satrec, lat, lon), sat.name);
     passesButton.disabled = false;
     passesButton.textContent = PASSES_BUTTON_DEFAULT_LABEL;
   });
