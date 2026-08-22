@@ -472,6 +472,33 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     for `handler.py` + `shared/passes.py`, with a matching
     `"tle_fetch.handler.handler"` entrypoint; otherwise the new file
     silently isn't in the deployed zip at all.
+  - **Docked-object handling (backlog item 14) — deployed 2026-08-21,
+    live:** new `HOST_STATION`/`DOCKED_AT` maps in `satellite_info.js`,
+    curated at the same confidence bar as the existing blurbs — real
+    docked/attached spacecraft and station modules only, not every
+    "stations"-group object (that group also includes independent
+    small satellites/debris that just share the tag). Detail panel shows
+    "Shares an orbit with X" on a visiting vehicle/module, or "Currently
+    docked: ..." on the host station itself — both directions derived
+    from one map, not maintained separately. Alert-side dedupe was
+    already correctly scoped to ISS-only from day one; nothing changed
+    there.
+  - **Relative brightness ranking — deployed 2026-08-22, live:** each
+    visible pass now shows "Brighter/dimmer than typical for X," compared
+    against that satellite's own other passes in the window (median
+    `relativeBrightnessScore` — Lambertian-sphere phase function over
+    range², both computed via satellite.js's documented
+    `geodeticToEcf`/`ecfToEci` pair against the true observer position).
+    Deliberately not an absolute magnitude estimate: that needs an
+    assumed albedo/shape the published photometry literature documents
+    as unreliable for real (especially flat-panel/shiny, e.g. Starlink)
+    satellites, whereas the unknown reflectivity/size terms cancel out
+    entirely in a same-object relative comparison. Verified numerically
+    against a real ISS TLE over a 14-day scan before wiring into the UI
+    — score tracks range/phase angle in the expected direction, including
+    a lower-elevation pass with better phase geometry outscoring a
+    higher-elevation one with worse geometry, matching real dawn/dusk
+    pass brightness experience rather than just elevation alone.
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
