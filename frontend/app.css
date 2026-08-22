@@ -205,3 +205,80 @@ html, body, #globe {
 #overhead-status { color: #8fa3b8; font-size: 0.75rem; margin: 4px 0 0; }
 #overhead-list { margin: 8px 0 0; padding-left: 18px; }
 #overhead-list li { margin-bottom: 8px; line-height: 1.35; }
+
+/* Bottom-center, not top — both top corners are already claimed by the
+   search box and the right-stack panels, and this only needs to be seen
+   once, not compete with either for attention. */
+#onboarding {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 420px;
+  width: calc(100% - 32px);
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(12, 20, 32, 0.92);
+  border: 1px solid #2d4a66;
+  color: #e8f1fa;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+#onboarding p { margin: 0; line-height: 1.35; }
+#onboarding-dismiss {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border: 1px solid #2d4a66;
+  border-radius: 6px;
+  background: #17324d;
+  color: #cfe8ff;
+  font-size: 0.8rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#onboarding-dismiss:hover { background: #1d4066; }
+
+/* Narrow/phone layout. Below 700px, #right-stack's fixed 265px width
+   physically overlaps #hud's search box (265px + 10px right-margin
+   leaves less than 220px of clearance on anything phone-width) — this
+   isn't a cosmetic tweak, it's a real collision bug on the one device
+   this project's actual use case ("go outside and look up") most needs
+   to work on. */
+@media (max-width: 700px) {
+  #hud { right: 10px; }
+  #sat-search { width: 100%; box-sizing: border-box; }
+
+  #right-stack {
+    top: 92px; /* clears the header now that it may wrap to more lines */
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-height: calc(100% - 102px);
+  }
+
+  /* Bumped from the desktop sizing — 6-8px padding is fine for a mouse
+     but too small to reliably tap. Not a full 44px WCAG target (the
+     panels are already tight on vertical space at this width), but a
+     real improvement over the desktop values. */
+  #obs-geolocate,
+  #obs-manual button,
+  #obs-manual input,
+  #passes-load,
+  #sat-search {
+    padding: 11px 12px;
+    font-size: 0.95rem;
+  }
+
+  /* Row layout gets cramped once the text wraps to 2+ lines at phone
+     widths — stack the button below instead of squeezing it to one side. */
+  #onboarding {
+    flex-direction: column;
+    align-items: stretch;
+    bottom: 10px;
+  }
+  #onboarding-dismiss { width: 100%; }
+}

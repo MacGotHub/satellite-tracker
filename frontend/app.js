@@ -67,6 +67,13 @@ viewer.scene.globe.enableLighting = true;
 // during development; leave it set.
 viewer.clock.shouldAnimate = true;
 
+// Coarse pointer = touch, independent of viewport width (a touch laptop
+// at desktop width still has a finger, not a mouse, doing the tapping).
+// Points sized for a mouse cursor's precision are hard to land a tap on;
+// this is the one property Cesium's canvas-rendered points won't pick up
+// from a CSS media query, so it needs its own JS check.
+const IS_TOUCH = window.matchMedia("(pointer: coarse)").matches;
+
 function entityFor(sat) {
   const existing = viewer.entities.getById(sat.id);
   if (existing) return existing;
@@ -74,7 +81,7 @@ function entityFor(sat) {
     id: sat.id,
     name: sat.name,
     point: {
-      pixelSize: sat.id === "25544" ? 10 : 7,
+      pixelSize: (sat.id === "25544" ? 10 : 7) + (IS_TOUCH ? 4 : 0),
       color:
         sat.id === "25544" ? Cesium.Color.GOLD : Cesium.Color.CYAN,
       outlineColor: Cesium.Color.BLACK,
@@ -294,6 +301,25 @@ viewer.clock.onTick.addEventListener((clock) => {
     refreshOverhead(now);
     lastPanelUpdateMs = nowMs;
   }
+});
+
+/* ---------- first-visit onboarding ---------- */
+/* A brand-new visitor lands on a dark globe with tiny dots and no
+ * indication what to do — this is the one-time nudge toward the three
+ * real entry points (search, set location, click a dot). Dismissal is
+ * permanent (localStorage flag), not per-session, since re-showing it
+ * every visit would just make it noise. */
+
+const ONBOARDING_DISMISSED_KEY = "sattrack-onboarding-dismissed";
+const onboardingEl = document.getElementById("onboarding");
+const onboardingDismissButton = document.getElementById("onboarding-dismiss");
+
+if (!localStorage.getItem(ONBOARDING_DISMISSED_KEY)) {
+  onboardingEl.hidden = false;
+}
+onboardingDismissButton.addEventListener("click", () => {
+  onboardingEl.hidden = true;
+  localStorage.setItem(ONBOARDING_DISMISSED_KEY, "1");
 });
 
 /* ---------- satellite finder ---------- */
