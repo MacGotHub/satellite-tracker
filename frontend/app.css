@@ -195,6 +195,12 @@ html, body, #globe {
 #passes-list { margin: 8px 0 0; padding-left: 18px; }
 #passes-list li { margin-bottom: 8px; line-height: 1.35; }
 #passes-list li.pass-dim, #overhead-list li.pass-dim { color: #8fa3b8; }
+.pass-brightness {
+  display: block;
+  color: #8fa3b8;
+  font-size: 0.75rem;
+  font-style: italic;
+}
 
 #overhead-status { color: #8fa3b8; font-size: 0.75rem; margin: 4px 0 0; }
 #overhead-list { margin: 8px 0 0; padding-left: 18px; }
