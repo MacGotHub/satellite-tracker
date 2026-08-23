@@ -206,6 +206,9 @@ html, body, #globe {
 #overhead-list { margin: 8px 0 0; padding-left: 18px; }
 #overhead-list li { margin-bottom: 8px; line-height: 1.35; }
 
+#weather-credit { color: #8fa3b8; font-size: 0.7rem; margin: 14px 0 0; }
+#weather-credit a { color: #9fd8ff; }
+
 /* Bottom-center, not top — both top corners are already claimed by the
    search box and the right-stack panels, and this only needs to be seen
    once, not compete with either for attention. */

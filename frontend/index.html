@@ -45,6 +45,10 @@
           what's overhead right now.</p>
         <ol id="overhead-list"></ol>
       </section>
+
+      <p id="weather-credit">Cloud cover (next 48h):
+        <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo.com</a>
+        (CC BY 4.0)</p>
     </aside>
 
     <aside id="panel" hidden>
@@ -63,7 +67,9 @@
         <p id="passes-inclination-note" hidden></p>
         <p id="passes-hint">Computed in your browser from this satellite's
           orbit — shows every visible pass above 10° elevation in the next
-          14 days (satellite sunlit, sky dark enough to see it).</p>
+          14 days (satellite sunlit, sky dark enough to see it). Passes in
+          the next 48 hours also account for forecast cloud cover;
+          further out, cloud cover isn't factored in.</p>
         <label id="passes-show-all-label">
           <input type="checkbox" id="passes-show-all" />
           Show all passes, not just visible ones
