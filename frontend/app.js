@@ -17,6 +17,7 @@ import {
   getDockedObjects,
   getHostStation,
 } from "./satellite_info.js";
+import { createTrueColorCloudsLayer } from "./gibs.js";
 
 const config = window.SATTRACK_CONFIG || {};
 const API = (config.apiBaseUrl || "").replace(/\/$/, "");
@@ -66,6 +67,23 @@ viewer.scene.globe.enableLighting = true;
 // renders once and then silently never updates. This bit it Derek's app
 // during development; leave it set.
 viewer.clock.shouldAnimate = true;
+
+// Opt-in, off by default — NASA GIBS true-color imagery (frontend/gibs.js)
+// is a full-globe layer, not a lightweight overlay, and this is new
+// enough (both to the project and as a request) that a toggle beats
+// forcing it on for every visitor. Off-by-default also means pulling it
+// back out, if it turns out not to be worth the tile-loading cost, is a
+// single-file revert with zero effect on anyone who left it unchecked.
+const cloudsToggle = document.getElementById("clouds-toggle");
+let cloudsLayer = null;
+cloudsToggle.addEventListener("change", () => {
+  if (cloudsToggle.checked) {
+    cloudsLayer = viewer.imageryLayers.addImageryProvider(createTrueColorCloudsLayer());
+  } else if (cloudsLayer) {
+    viewer.imageryLayers.remove(cloudsLayer);
+    cloudsLayer = null;
+  }
+});
 
 // Coarse pointer = touch, independent of viewport width (a touch laptop
 // at desktop width still has a finger, not a mouse, doing the tapping).
