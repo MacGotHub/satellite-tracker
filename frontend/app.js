@@ -17,7 +17,7 @@ import {
   getDockedObjects,
   getHostStation,
 } from "./satellite_info.js";
-import { createTrueColorCloudsLayer } from "./gibs.js";
+import { createRadarLayer } from "./radar.js";
 
 const config = window.SATTRACK_CONFIG || {};
 const API = (config.apiBaseUrl || "").replace(/\/$/, "");
@@ -68,20 +68,46 @@ viewer.scene.globe.enableLighting = true;
 // during development; leave it set.
 viewer.clock.shouldAnimate = true;
 
-// Opt-in, off by default — NASA GIBS true-color imagery (frontend/gibs.js)
-// is a full-globe layer, not a lightweight overlay, and this is new
-// enough (both to the project and as a request) that a toggle beats
-// forcing it on for every visitor. Off-by-default also means pulling it
-// back out, if it turns out not to be worth the tile-loading cost, is a
-// single-file revert with zero effect on anyone who left it unchecked.
-const cloudsToggle = document.getElementById("clouds-toggle");
-let cloudsLayer = null;
-cloudsToggle.addEventListener("change", () => {
-  if (cloudsToggle.checked) {
-    cloudsLayer = viewer.imageryLayers.addImageryProvider(createTrueColorCloudsLayer());
-  } else if (cloudsLayer) {
-    viewer.imageryLayers.remove(cloudsLayer);
-    cloudsLayer = null;
+// Opt-in, off by default — same reasoning as the NASA true-color imagery
+// this replaced: new enough, both to the project and as a request, that
+// a toggle beats forcing it on for every visitor, and off-by-default
+// means pulling it back out is a single-file revert with zero effect on
+// anyone who left it unchecked.
+const RADAR_REFRESH_MS = 5 * 60_000; // matches RainViewer's own ~5-min update cadence
+const radarToggle = document.getElementById("radar-toggle");
+let radarLayer = null;
+let radarRefreshInterval = null;
+
+async function refreshRadarLayer() {
+  let fresh;
+  try {
+    fresh = await createRadarLayer();
+  } catch (err) {
+    console.warn("radar layer fetch failed, leaving previous frame in place", err);
+    return;
+  }
+  // The toggle can flip off while this fetch is in flight — without this
+  // check, a slow response would silently re-add the layer right after
+  // the user turned it off.
+  if (!radarToggle.checked) return;
+  // Add the new frame before removing the old one — avoids a visible
+  // blank flash between frames on each refresh.
+  const previous = radarLayer;
+  radarLayer = viewer.imageryLayers.addImageryProvider(fresh);
+  if (previous) viewer.imageryLayers.remove(previous);
+}
+
+radarToggle.addEventListener("change", () => {
+  if (radarToggle.checked) {
+    refreshRadarLayer();
+    radarRefreshInterval = setInterval(refreshRadarLayer, RADAR_REFRESH_MS);
+  } else {
+    clearInterval(radarRefreshInterval);
+    radarRefreshInterval = null;
+    if (radarLayer) {
+      viewer.imageryLayers.remove(radarLayer);
+      radarLayer = null;
+    }
   }
 });
 
