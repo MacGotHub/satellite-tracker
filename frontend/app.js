@@ -498,6 +498,11 @@ function setActiveObserver(lat, lon, source) {
   activeObserver = { lat, lon, source };
   localStorage.setItem(OBSERVER_STORAGE_KEY, JSON.stringify(activeObserver));
   obsActiveEl.textContent = `Observer: ${lat.toFixed(3)}°, ${lon.toFixed(3)}° (${source})`;
+  // Fire-and-forget — ensureWeather() is defined further down but is a
+  // hoisted function declaration, and this only ever actually runs later
+  // (a click handler, or loadPersistedObserver() at startup), by which
+  // point the whole module has already finished loading.
+  ensureWeather(lat, lon);
 }
 
 function loadPersistedObserver() {
@@ -569,6 +574,90 @@ observerPinHandler.setInputAction((click) => {
   obsLonInput.value = lon.toFixed(3);
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK, Cesium.KeyboardEventModifier.SHIFT);
 
+/* ---------- weather (cloud cover) ---------- */
+/* Cloud-aware visibility, deliberately scoped to the next 48 hours only.
+ * Open-Meteo's forecast is genuinely reliable at that range; treating a
+ * cloud forecast 10+ days out with the same confidence as the
+ * deterministic sun/eclipse geometry below would overstate what we
+ * actually know. Free, no API key, CORS-open (confirmed directly against
+ * the live endpoint before writing this) — CC-BY 4.0 attribution lives
+ * in index.html, required by their license.
+ *
+ * Fetched independently of the render loop (like refreshCatalog()'s own
+ * periodic refresh), not awaited inside viewer.clock.onTick — that keeps
+ * classifyVisibility() fully synchronous, just reading whatever's
+ * currently cached, the same way it already reads sun/eclipse state.
+ */
+
+const WEATHER_WINDOW_HOURS = 48;
+const CLOUDY_THRESHOLD_PCT = 70; // total sky cover; doesn't model patchy breaks
+const WEATHER_REFRESH_MS = 20 * 60_000;
+
+let weatherCache = null; // { lat, lon, fetchedAtMs, hourly: [{ time, cloudCoverPct }] }
+
+function weatherCacheIsFresh(lat, lon) {
+  if (!weatherCache) return false;
+  const sameLocation =
+    Math.abs(weatherCache.lat - lat) < 0.05 && Math.abs(weatherCache.lon - lon) < 0.05;
+  return sameLocation && Date.now() - weatherCache.fetchedAtMs < WEATHER_REFRESH_MS;
+}
+
+async function ensureWeather(lat, lon) {
+  if (weatherCacheIsFresh(lat, lon)) return;
+  try {
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&hourly=cloud_cover&forecast_days=2&timezone=UTC`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Open-Meteo ${response.status}`);
+    const body = await response.json();
+    const hourly = body.hourly.time.map((t, i) => ({
+      time: new Date(`${t}Z`),
+      cloudCoverPct: body.hourly.cloud_cover[i],
+    }));
+    weatherCache = { lat, lon, fetchedAtMs: Date.now(), hourly };
+  } catch (err) {
+    // Best-effort, same as this project's other external-fetch failure
+    // handling: passes/overhead still compute from sun/eclipse geometry
+    // alone, just without the cloud check.
+    console.warn("weather fetch failed, continuing without cloud cover", err);
+  }
+}
+
+// null (either no fetch yet, or this time falls outside the fetched
+// window) is deliberately silent, not a fallback guess — the 48h scope
+// boundary lives here, not in classifyVisibility().
+function cloudCoverAt(date) {
+  if (!weatherCache || weatherCache.hourly.length === 0) return null;
+  const hours = weatherCache.hourly;
+  const windowEnd = new Date(hours[0].time.getTime() + WEATHER_WINDOW_HOURS * 3600_000);
+  if (date < hours[0].time || date > windowEnd) return null;
+
+  // Nearest hourly sample — good enough for a threshold check, not a
+  // scientific instrument.
+  let nearest = hours[0];
+  let nearestDiffMs = Math.abs(date - hours[0].time);
+  for (const h of hours) {
+    const diffMs = Math.abs(date - h.time);
+    if (diffMs < nearestDiffMs) {
+      nearest = h;
+      nearestDiffMs = diffMs;
+    }
+  }
+  return nearest.cloudCoverPct;
+}
+
+// "Overhead now" runs continuously off the render loop's own 1s throttle,
+// not a single button click — this keeps its cloud data from going stale
+// for as long as an observer stays set, without awaiting anything inside
+// viewer.clock.onTick itself. activeObserver/ensureWeather are declared
+// later in the file but both are functions/assigned before this callback
+// ever actually fires, so no ordering issue the way a bare top-level
+// reference to a later const would have.
+setInterval(() => {
+  if (activeObserver) ensureWeather(activeObserver.lat, activeObserver.lon);
+}, WEATHER_REFRESH_MS);
+
 /* ---------- local pass prediction ---------- */
 /* Rise/culminate/set, azimuth, elevation, and (DESIGN.md backlog item 8)
  * a visibility verdict — satellite.js has no find_events() equivalent, so
@@ -607,6 +696,13 @@ function classifyVisibility(satrec, peakTime, observerLatDeg, observerLonDeg) {
   }
   if (!isSunlit(posVel.position, sun)) {
     return { visible: false, reason: "eclipsed" };
+  }
+  // Checked last, after the deterministic geometry above — this is the
+  // one non-deterministic factor in the chain, and cloudCoverAt() itself
+  // enforces the 48h scope (returns null, never a guess, beyond it).
+  const cloudCoverPct = cloudCoverAt(peakTime);
+  if (cloudCoverPct != null && cloudCoverPct >= CLOUDY_THRESHOLD_PCT) {
+    return { visible: false, reason: "cloudy" };
   }
   return { visible: true, reason: null };
 }
@@ -781,6 +877,7 @@ let lastComputedSatName = null; // for the brightness label's "...for X" — re-
 const VISIBILITY_REASON_LABELS = {
   daylight: "daylight",
   eclipsed: "satellite in shadow",
+  cloudy: "cloudy skies",
 };
 
 function median(numbers) {
@@ -930,8 +1027,14 @@ function renderInclinationNote(satrec, observerLatDeg) {
 
 const PASSES_BUTTON_DEFAULT_LABEL = "Predict passes here (use my location)";
 
-function computeAndRenderPasses(sat, lat, lon) {
+async function computeAndRenderPasses(sat, lat, lon) {
   passesButton.disabled = true;
+  passesButton.textContent = "Checking weather…";
+  // Best-effort and never rejects (see ensureWeather) — a slow or failed
+  // weather fetch degrades to "no cloud data for this window," it never
+  // blocks pass computation itself.
+  await ensureWeather(lat, lon);
+
   passesButton.textContent = "Computing…";
   renderInclinationNote(sat.satrec, lat);
   // Defer to the next paint so "Computing…" actually becomes visible
