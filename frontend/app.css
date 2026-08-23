@@ -32,7 +32,7 @@ html, body, #globe {
    re-enable just for the search box. */
 #finder { margin-top: 8px; pointer-events: auto; }
 
-#clouds-toggle-label {
+#radar-toggle-label {
   display: flex;
   align-items: center;
   gap: 6px;
