@@ -231,6 +231,37 @@ function hasValidPosition(posVel) {
 
 let bulkSkippedThisCycle = 0;
 
+/* Trailing orbit path for whichever satellite is currently selected —
+ * a plain mutable array + Cesium.CallbackProperty, not
+ * Cesium.SampledPositionProperty. SampledPositionProperty is the more
+ * "native" way to get a Path visualization, but it has no documented way
+ * to prune old samples (see CesiumGS/cesium#2520) short of reaching into
+ * private _times/_values internals — a real concern for a page that
+ * could stay open for hours. A self-managed array sidesteps that
+ * entirely: wall-clock-throttled sampling below bounds how fast it
+ * grows, and pruning is just an array shift, both fully in our own
+ * control with only public Cesium API (CallbackProperty) involved.
+ * Scoped to one trail at a time (the selection), not all ~180 interactive
+ * satellites simultaneously — every dot trailing at once would be visual
+ * noise, not a feature.
+ */
+const TRAIL_SAMPLE_INTERVAL_MS = 5_000;
+const TRAIL_DURATION_MS = 10 * 60_000; // ~1/9 of a LEO orbit — a visible arc, not a full loop
+let trailPositions = []; // [{ time, position }], oldest first
+let trailSatId = null;
+let lastTrailSampleMs = 0;
+
+viewer.entities.add({
+  polyline: {
+    positions: new Cesium.CallbackProperty(
+      () => trailPositions.map((p) => p.position),
+      false
+    ),
+    width: 2,
+    material: Cesium.Color.CYAN.withAlpha(0.5),
+  },
+});
+
 viewer.clock.onTick.addEventListener((clock) => {
   const now = Cesium.JulianDate.toDate(clock.currentTime);
   const gmst = satellite.gstime(now);
@@ -251,7 +282,19 @@ viewer.clock.onTick.addEventListener((clock) => {
     const altKm = geo.height;
 
     currentPositions.set(sat.id, { lat, lon, alt_km: altKm });
-    entityFor(sat).position = Cesium.Cartesian3.fromDegrees(lon, lat, altKm * 1000);
+    const cartesian = Cesium.Cartesian3.fromDegrees(lon, lat, altKm * 1000);
+    entityFor(sat).position = cartesian;
+
+    if (sat.id === trailSatId) {
+      const nowMs = Date.now();
+      if (nowMs - lastTrailSampleMs >= TRAIL_SAMPLE_INTERVAL_MS) {
+        trailPositions.push({ time: nowMs, position: cartesian });
+        lastTrailSampleMs = nowMs;
+        while (trailPositions.length && nowMs - trailPositions[0].time > TRAIL_DURATION_MS) {
+          trailPositions.shift();
+        }
+      }
+    }
   }
 
   if (bulkCatalog.length > 0) {
@@ -431,6 +474,12 @@ viewer.selectedEntityChanged.addEventListener(() => {
   passesInclinationNoteEl.hidden = true; // stale for the newly-selected satellite
   lastComputedPasses = null; // stale for the newly-selected satellite
   refreshPanel(); // immediate on selection change, not throttle-delayed
+
+  // Clear immediately, not just re-target — otherwise the previous
+  // satellite's trail would render for a moment against the newly
+  // selected one's position.
+  trailPositions = [];
+  trailSatId = viewer.selectedEntity ? viewer.selectedEntity.id : null;
 });
 
 /* ---------- observer location (Geolocation + manual entry) ---------- */
