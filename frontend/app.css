@@ -32,6 +32,18 @@ html, body, #globe {
    re-enable just for the search box. */
 #finder { margin-top: 8px; pointer-events: auto; }
 
+#clouds-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  pointer-events: auto;
+  color: #9fd8ff;
+  font-size: 0.75rem;
+  text-shadow: 0 1px 3px #000;
+  cursor: pointer;
+}
+
 #sat-search {
   width: 220px;
   padding: 6px 10px;
