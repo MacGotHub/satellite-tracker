@@ -499,6 +499,39 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     a lower-elevation pass with better phase geometry outscoring a
     higher-elevation one with worse geometry, matching real dawn/dusk
     pass brightness experience rather than just elevation alone.
+  - **Mobile-responsive layout + first-visit onboarding hint — deployed
+    2026-08-22, live:** below 700px, `#right-stack`'s fixed 265px width
+    was physically overlapping `#hud`'s search box — a real collision on
+    phone-width screens, not a cosmetic gap. Media query switches it to
+    margin-based sizing, bumps touch-target padding, and bumps
+    interactive satellite point size on coarse-pointer (touch) devices
+    specifically (`matchMedia("(pointer: coarse)")`), independent of
+    viewport width. Also new: a dismissible bottom-center onboarding
+    banner for first-time visitors (search/set-location/click-a-dot),
+    permanent dismissal via `localStorage`.
+  - **Trailing orbit path — deployed 2026-08-23, live:** a fading
+    polyline trail renders behind whichever satellite is currently
+    selected. Deliberately a self-managed array + rendered via
+    `Cesium.CallbackProperty`, not `Cesium.SampledPositionProperty` — the
+    latter has no documented way to prune old samples short of reaching
+    into private internals (CesiumGS/cesium#2520), a real concern for a
+    page that could stay open for hours. Wall-clock-throttled (one point
+    per 5s, pruned past 10 minutes) and scoped to one trail at a time,
+    reset on every `selectedEntityChanged`.
+  - **Cloud-cover awareness — deployed 2026-08-23, live:** new "cloudy"
+    reason in `classifyVisibility()`, using Open-Meteo's free hourly
+    cloud-cover forecast (no API key, CORS-open — confirmed directly
+    against the live endpoint) for the observer's location. Deliberately
+    bounded to the next 48 hours only — `cloudCoverAt()` returns null
+    (never a guess) outside that window, since a forecast 10+ days out
+    doesn't deserve the same confidence as the deterministic sun/eclipse
+    geometry already in that function. Applies to both "Overhead now"
+    and the passes list for free, since both already route through
+    `classifyVisibility()`. Fetched independently of the render loop
+    (once per observer-location change, plus a 20-min background
+    refresh) — best-effort, a failed fetch just means no cloud data,
+    never blocks pass/overhead computation. CC-BY 4.0 attribution added
+    near the observer panel per Open-Meteo's license.
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
