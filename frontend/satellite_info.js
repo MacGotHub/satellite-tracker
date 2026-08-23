@@ -124,6 +124,16 @@ const PATTERN_BLURBS = [
   },
 ];
 
+// "Notable" means specifically curated (KNOWN_BLURBS), not the generic
+// pattern fallbacks below (R/B, DEB, "Cosmos ###", etc.) — those cover
+// dozens of objects each and would flood a "most interesting first"
+// ordering rather than surface it. This is exactly the same curated set
+// as the blurbs themselves: real, verifiable, individually-described
+// objects, nothing broader.
+export function isNotableSatellite(name) {
+  return Object.prototype.hasOwnProperty.call(KNOWN_BLURBS, name);
+}
+
 export function getSatelliteBlurb(name) {
   if (Object.prototype.hasOwnProperty.call(KNOWN_BLURBS, name)) {
     return KNOWN_BLURBS[name];

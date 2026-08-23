@@ -16,6 +16,7 @@ import {
   getSatelliteBlurb,
   getDockedObjects,
   getHostStation,
+  isNotableSatellite,
 } from "./satellite_info.js";
 import { createRadarLayer } from "./radar.js";
 
@@ -418,9 +419,17 @@ const searchOptions = document.getElementById("sat-options");
 // satellites doesn't change frame to frame.
 function populateFinder() {
   if (finderPopulated || catalog.size === 0) return;
+  // Notable (curated, individually-described) objects first — ISS,
+  // Hubble, Terra, and the like — alphabetical within each tier. Datalist
+  // suggestions render in source order, so this ordering is exactly what
+  // the browser shows as you type, not just how the <option> elements
+  // happen to be laid out in markup.
   const names = [...catalog.values()]
     .map((sat) => sat.name)
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => {
+      const notableDiff = Number(isNotableSatellite(b)) - Number(isNotableSatellite(a));
+      return notableDiff !== 0 ? notableDiff : a.localeCompare(b);
+    });
   searchOptions.replaceChildren(
     ...names.map((name) => {
       const option = document.createElement("option");
