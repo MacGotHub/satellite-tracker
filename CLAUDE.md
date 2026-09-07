@@ -532,6 +532,32 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     refresh) — best-effort, a failed fetch just means no cloud data,
     never blocks pass/overhead computation. CC-BY 4.0 attribution added
     near the observer panel per Open-Meteo's license.
+  - **Weather overlay + blurb/finder polish — deployed 2026-08-23,
+    live:** opt-in "Show clouds" checkbox on the globe, off by default.
+    First cut used NASA GIBS true-color MODIS Terra imagery
+    (`frontend/gibs.js`, porting NASA's own reference EPSG:4326 tiling
+    scheme) but that's a full opaque photo of the whole Earth — it buried
+    the observer marker and satellite dots, defeating the point. Replaced
+    same-day with a RainViewer weather-radar overlay (`frontend/radar.js`)
+    instead: standard XYZ/Web Mercator tiles via Cesium's stock
+    `UrlTemplateImageryProvider`, transparent except where there's actual
+    precipitation, 5-min refresh matching RainViewer's own cadence
+    (new frame added before the old one is removed to avoid a blank
+    flash; guarded against the toggle flipping off mid-fetch). This is a
+    different kind of cloud data from the Open-Meteo forecast used for
+    pass visibility above — a recent actual satellite/radar picture, not
+    a forecast, and purely visual (doesn't feed `classifyVisibility()`).
+    Also: curated blurbs expanded to ~25 more notable science/astronomy
+    satellites in the `visual` group (Terra, Hubble, Aqua, Envisat, and
+    others — same verified-mission bar as existing entries), plus new
+    name-pattern fallbacks for COSMOS/USA/YAOGAN/SPACEMOBILE designations
+    where a per-object mission isn't knowable but the designation itself
+    means something. Satellite finder's `<option>` list now sorts curated
+    "notable" objects (reusing the blurb set) first, alphabetical after —
+    generic pattern fallbacks deliberately excluded from "notable" so they
+    don't flood the top of the list. README also corrected — it still
+    claimed Phases 1-3 done/4-5 not started and that the API computes
+    positions with Skyfield (moved client-side in Phase 6).
 
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
