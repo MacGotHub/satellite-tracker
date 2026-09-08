@@ -20,8 +20,12 @@
 # -----------------------------------------------
 
 module "cicd" {
+  # checkov:skip=CKV_TF_1: private registry source pinned by the `version`
+  # constraint below. CKV_TF_1 only recognises a git source at a commit
+  # SHA; it has no notion of registry version pinning, which is the
+  # equivalent guarantee here.
   source  = "app.terraform.io/macgothub/oidc-cicd/aws"
-  version = "~> 0.2"
+  version = "~> 0.2.0"
 
   name_prefix = local.name_prefix
 
