@@ -3,82 +3,59 @@
 #
 # No static AWS keys in GitHub secrets. GitHub Actions presents a
 # short-lived signed OIDC token; AWS trades it for temporary STS
-# credentials scoped to one of the two roles below. Two roles, not one,
-# so a PR from any branch can only ever get read-only access — write
-# access requires the token to additionally prove `ref = refs/heads/main`,
-# which only a push to main (post-merge) can produce.
+# credentials scoped to one of two roles: a read-only plan role any ref/PR
+# can assume, and a read-write apply role only a push to main can assume.
 #
-# Pre-flight check (2026-07-25): `aws iam list-open-id-connect-providers`
-# returned empty for this account — no past-lab provider to reuse, so this
-# creates one directly instead of referencing one via a data source.
+# The OIDC provider and both trust-boundary roles now come from the shared
+# oidc-cicd module (app.terraform.io/macgothub/oidc-cicd/aws) — the
+# read/write split, the branch pin, the live-thumbprint fetch, and the
+# provider plumbing were rebuilt near-identically in three sibling repos.
+# This file keeps only sattrack's own read/write/bootstrap permission
+# policies bolted onto the module's roles; the module attaches none.
+#
+# create_oidc_provider = true: the 2026-07-25 pre-flight check found no
+# existing provider for token.actions.githubusercontent.com in this
+# account, so this project owns it. github_subject_prefix_override carries
+# GitHub's immutable numeric-ID sub claim form (see locals.tf).
 # -----------------------------------------------
 
-# GitHub rotates the TLS cert on token.actions.githubusercontent.com
-# periodically (it did in 2023, breaking every hardcoded-thumbprint setup
-# industry-wide) — fetch it live instead of pasting a thumbprint that will
-# eventually go stale.
-data "tls_certificate" "github_actions" {
-  url = "https://token.actions.githubusercontent.com"
+module "cicd" {
+  # checkov:skip=CKV_TF_1: private registry source pinned by the `version`
+  # constraint below. CKV_TF_1 only recognises a git source at a commit
+  # SHA; it has no notion of registry version pinning, which is the
+  # equivalent guarantee here.
+  source  = "app.terraform.io/macgothub/oidc-cicd/aws"
+  version = "~> 0.2.0"
+
+  name_prefix = local.name_prefix
+
+  create_oidc_provider           = true
+  github_subject_prefix_override = local.github_oidc_sub_prefix
+
+  # No tags argument: provider default_tags already applies common_tags to
+  # every resource in this project, the provider and these roles included.
 }
 
-resource "aws_iam_openid_connect_provider" "github_actions" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.github_actions.certificates[length(data.tls_certificate.github_actions.certificates) - 1].sha1_fingerprint]
+# The provider and roles pre-exist in state (Phase 5, 2026-07-27). Names,
+# the trust policies, and the provider's URL/client-id/thumbprint-derivation
+# are identical to what the module generates, so these are pure state
+# address changes -- no resource replacement.
+#
+# (data.tls_certificate.github_actions has no `moved` entry: it's a data
+# source, not managed state -- it simply re-reads from inside the module.)
+moved {
+  from = aws_iam_openid_connect_provider.github_actions
+  to   = module.cicd.aws_iam_openid_connect_provider.github_actions[0]
 }
 
-# -----------------------------------------------
-# Roles
-# -----------------------------------------------
-
-# Assumed by the PR-triggered plan workflow. Repo-scoped but NOT
-# branch-scoped — StringLike with a wildcard suffix so it matches both
-# `...:pull_request` and `...:ref:refs/heads/<any-branch>`. Safe to be
-# this loose only because this role is read-only below.
-resource "aws_iam_role" "gha_plan" {
-  name = "${local.name_prefix}-gha-plan"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.github_actions.arn }
-      Action    = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringEquals = {
-          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        }
-        StringLike = {
-          "token.actions.githubusercontent.com:sub" = "${local.github_oidc_sub_prefix}:*"
-        }
-      }
-    }]
-  })
+moved {
+  from = aws_iam_role.gha_plan
+  to   = module.cicd.aws_iam_role.plan
 }
 
-# Assumed by the push-to-main apply workflow only. Pinned to exactly one
-# ref via StringLike (no wildcard is needed in the ref segment itself, but
-# StringLike vs. StringEquals doesn't matter here — the whole suffix is
-# fixed). This is the trust-policy line DESIGN.md calls out: a wildcard
-# `sub` here would let a PR from a fork assume a role that can change
-# live infrastructure.
-resource "aws_iam_role" "gha_apply" {
-  name = "${local.name_prefix}-gha-apply"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Federated = aws_iam_openid_connect_provider.github_actions.arn }
-      Action    = "sts:AssumeRoleWithWebIdentity"
-      Condition = {
-        StringEquals = {
-          "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-          "token.actions.githubusercontent.com:sub" = "${local.github_oidc_sub_prefix}:ref:refs/heads/main"
-        }
-      }
-    }]
-  })
+moved {
+  from = aws_iam_role.gha_apply
+  to   = module.cicd.aws_iam_role.apply
 }
 
 # -----------------------------------------------
@@ -141,12 +118,12 @@ resource "aws_iam_policy" "gha_read" {
         Resource = [aws_s3_bucket.tle_archive.arn, aws_s3_bucket.frontend.arn]
       },
       {
-        # The AWS provider refreshes this resource's own state on every
-        # plan, same as anything else this module manages.
+        # The AWS provider refreshes the module-managed OIDC provider's
+        # state on every plan, same as anything else here.
         Sid      = "OidcProviderRead"
         Effect   = "Allow"
         Action   = "iam:GetOpenIDConnectProvider"
-        Resource = aws_iam_openid_connect_provider.github_actions.arn
+        Resource = module.cicd.oidc_provider_arn
       },
       {
         Sid      = "S3ObjectRead"
@@ -241,12 +218,12 @@ resource "aws_iam_policy" "gha_read" {
 }
 
 resource "aws_iam_role_policy_attachment" "gha_plan_read" {
-  role       = aws_iam_role.gha_plan.name
+  role       = module.cicd.plan_role_name
   policy_arn = aws_iam_policy.gha_read.arn
 }
 
 resource "aws_iam_role_policy_attachment" "gha_apply_read" {
-  role       = aws_iam_role.gha_apply.name
+  role       = module.cicd.apply_role_name
   policy_arn = aws_iam_policy.gha_read.arn
 }
 
@@ -295,12 +272,12 @@ resource "aws_iam_policy" "gha_read_bootstrap" {
 }
 
 resource "aws_iam_role_policy_attachment" "gha_plan_read_bootstrap" {
-  role       = aws_iam_role.gha_plan.name
+  role       = module.cicd.plan_role_name
   policy_arn = aws_iam_policy.gha_read_bootstrap.arn
 }
 
 resource "aws_iam_role_policy_attachment" "gha_apply_read_bootstrap" {
-  role       = aws_iam_role.gha_apply.name
+  role       = module.cicd.apply_role_name
   policy_arn = aws_iam_policy.gha_read_bootstrap.arn
 }
 
@@ -477,7 +454,7 @@ resource "aws_iam_policy" "gha_write" {
 }
 
 resource "aws_iam_role_policy_attachment" "gha_apply_write" {
-  role       = aws_iam_role.gha_apply.name
+  role       = module.cicd.apply_role_name
   policy_arn = aws_iam_policy.gha_write.arn
 }
 
@@ -563,7 +540,7 @@ resource "aws_iam_policy" "gha_write_bootstrap" {
 }
 
 resource "aws_iam_role_policy_attachment" "gha_apply_write_bootstrap" {
-  role       = aws_iam_role.gha_apply.name
+  role       = module.cicd.apply_role_name
   policy_arn = aws_iam_policy.gha_write_bootstrap.arn
 }
 

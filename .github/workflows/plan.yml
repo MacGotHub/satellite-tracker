@@ -77,6 +77,11 @@ jobs:
 
       - name: tofu init
         working-directory: opentofu
+        env:
+          # Authenticates `tofu init` to the HCP Terraform private module
+          # registry (app.terraform.io) — the oidc-cicd module is sourced
+          # from there.
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_REGISTRY_TOKEN }}
         run: tofu init
 
       # Writes the human-readable plan straight into the job summary tab
