@@ -8,10 +8,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.0"
     }
-    tls = {
-      source  = "hashicorp/tls"
-      version = "~> 4.0"
-    }
+    # tls dropped with oidc-cicd v0.3.0 — the module no longer does a live
+    # data.tls_certificate read for the OIDC provider thumbprint, and
+    # nothing else here uses it. (A stale tls entry may linger in
+    # .terraform.lock.hcl until the next `tofu init -upgrade`; harmless.)
     time = {
       source  = "hashicorp/time"
       version = "~> 0.13"
