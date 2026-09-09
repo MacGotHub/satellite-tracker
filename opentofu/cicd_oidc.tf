@@ -25,7 +25,7 @@ module "cicd" {
   # SHA; it has no notion of registry version pinning, which is the
   # equivalent guarantee here.
   source  = "app.terraform.io/macgothub/oidc-cicd/aws"
-  version = "~> 0.2.0"
+  version = "~> 0.3.0"
 
   name_prefix = local.name_prefix
 
@@ -366,21 +366,6 @@ resource "aws_iam_policy" "gha_write" {
           "iam:TagRole", "iam:UntagRole"
         ]
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-*"
-      },
-      {
-        # The oidc-cicd module derives the provider's thumbprint from a
-        # live data.tls_certificate read, and GitHub's endpoint (behind a
-        # CDN) presents varying cert chains -- so `certificates[length-1]`
-        # comes back different across reads and every apply plans a
-        # thumbprint update. Without this, apply.yml AccessDenies on it
-        # forever. (AWS itself stopped verifying this thumbprint for
-        # token.actions.githubusercontent.com in 2023 -- the churn is
-        # cosmetic; oidc-cicd should stop re-deriving it in a future
-        # version, at which point this grant can go.)
-        Sid      = "OidcProviderThumbprintWrite"
-        Effect   = "Allow"
-        Action   = "iam:UpdateOpenIDConnectProviderThumbprint"
-        Resource = module.cicd.oidc_provider_arn
       },
       {
         # IAM caps customer-managed policies at 5 versions — gha_read and
