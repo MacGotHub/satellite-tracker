@@ -559,6 +559,27 @@ Estimates are Derek's own, evening/weekend pace with Claude Code.
     claimed Phases 1-3 done/4-5 not started and that the API computes
     positions with Skyfield (moved client-side in Phase 6).
 
+- **Real gap found and fixed, 2026-09-14: `sattrack-alerts` had zero
+  subscriptions.** `aws sns list-subscriptions-by-topic` came back
+  completely empty — not "unconfirmed," genuinely no subscription ever
+  existed, despite CLAUDE.md's Phase 4 entry above claiming an email
+  subscription was added out-of-band. Every ISS pass alert since Phase 4
+  shipped (2026-07-18) has been publishing successfully and going
+  nowhere. Fixed by re-subscribing `drmcwilliams13@gmail.com` — pending
+  email confirmation as of this note.
+- **`abuse-alarm` adoption blocked, 2026-09-14** — see PR #41
+  (`adopt-abuse-alarm`, open since 2026-09-09): its `plan` check fails
+  with "Module macgothub/abuse-alarm/aws cannot be found in the module
+  registry at app.terraform.io," even though `oidc-cicd` resolves fine
+  from the same registry in the same `tofu init`. Root cause looks like
+  the module was tagged in `terraform-aws-cost-guardrails`' git history
+  but never actually *published* as its own module in the HCP Terraform
+  private registry (a separate, manual one-time step per module,
+  independent of git tags) — `cost-budget` has the same "tagged but never
+  pulled by any repo" status per that repo's own CLAUDE.md, so it may
+  have the identical gap, untested. Needs the registry side fixed before
+  this PR (or `orbital-watch`'s equivalent) can merge.
+
 ### Owner Prerequisites (not build tasks)
 - ~~Create GitHub repo `MacGotHub/satellite-tracker`~~ — done 2026-07-18,
   history pushed (was local-only for two days)
