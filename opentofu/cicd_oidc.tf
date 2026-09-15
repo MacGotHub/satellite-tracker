@@ -495,6 +495,23 @@ resource "aws_iam_role_policy_attachment" "gha_apply_write" {
   policy_arn = aws_iam_policy.gha_write.arn
 }
 
+# Live-confirmed the same IAM eventual-consistency gap this file already
+# names above (gha_read_bootstrap_propagation / gha_write_bootstrap_propagation):
+# adding SnsAbuseAlarmTopicWrite/CloudWatchAlarmWrite to gha_write and
+# module.abuse_alarm's resources landing in the same apply meant
+# sns:CreateTopic AccessDenied'd about a second after the policy update
+# call itself returned success. module.abuse_alarm depends_on this so its
+# resources wait out the same propagation gap, not just the plain
+# attachment.
+resource "time_sleep" "wait_for_abuse_alarm_iam" {
+  depends_on      = [aws_iam_role_policy_attachment.gha_apply_write]
+  create_duration = "10s"
+
+  triggers = {
+    policy = aws_iam_policy.gha_write.policy
+  }
+}
+
 # -----------------------------------------------
 # Permissions — write "bootstrap" policy (apply role only)
 #
