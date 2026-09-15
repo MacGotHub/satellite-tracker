@@ -162,10 +162,23 @@ resource "aws_iam_policy" "gha_read" {
         Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name_prefix}-gha-*"
       },
       {
-        Sid      = "SnsRead"
+        Sid    = "SnsRead"
+        Effect = "Allow"
+        Action = ["sns:GetTopicAttributes", "sns:ListTagsForResource", "sns:ListSubscriptionsByTopic"]
+        Resource = [
+          aws_sns_topic.alerts.arn,
+          "arn:aws:sns:us-east-1:${data.aws_caller_identity.current.account_id}:${local.name_prefix}-abuse-alarms",
+        ]
+      },
+      {
+        # DescribeAlarms/ListTagsForResource don't support resource-level
+        # scoping — same class of AWS API limitation as
+        # logs:DescribeLogGroups elsewhere in this file, confirmed live in
+        # orbital-watch (same account) for this exact abuse-alarm module.
+        Sid      = "CloudWatchAlarmRead"
         Effect   = "Allow"
-        Action   = ["sns:GetTopicAttributes", "sns:ListTagsForResource", "sns:ListSubscriptionsByTopic"]
-        Resource = aws_sns_topic.alerts.arn
+        Action   = ["cloudwatch:DescribeAlarms", "cloudwatch:ListTagsForResource"]
+        Resource = "*"
       },
       {
         Sid    = "SchedulerRead"
@@ -398,10 +411,34 @@ resource "aws_iam_policy" "gha_write" {
         }
       },
       {
-        Sid      = "SnsWrite"
+        Sid    = "SnsWrite"
+        Effect = "Allow"
+        Action = ["sns:SetTopicAttributes", "sns:TagResource", "sns:UntagResource"]
+        Resource = [
+          aws_sns_topic.alerts.arn,
+          "arn:aws:sns:us-east-1:${data.aws_caller_identity.current.account_id}:${local.name_prefix}-abuse-alarms",
+        ]
+      },
+      {
+        # abuse_alarm.tf's own topic — CreateTopic/DeleteTopic scoped to
+        # its exact, predictable ARN (same pattern as S3 CreateBucket
+        # elsewhere in these sibling repos: the resource doesn't need to
+        # exist yet for a Create action scoped to its own future ARN).
+        Sid      = "SnsAbuseAlarmTopicWrite"
         Effect   = "Allow"
-        Action   = ["sns:SetTopicAttributes", "sns:TagResource", "sns:UntagResource"]
-        Resource = aws_sns_topic.alerts.arn
+        Action   = ["sns:CreateTopic", "sns:DeleteTopic"]
+        Resource = "arn:aws:sns:us-east-1:${data.aws_caller_identity.current.account_id}:${local.name_prefix}-abuse-alarms"
+      },
+      {
+        # PutMetricAlarm/DeleteAlarms/TagResource/UntagResource grouped
+        # with Resource "*" to match orbital-watch's own proven-live
+        # precedent for this exact module (its budget_guardrails.tf) —
+        # not narrowed further here to avoid rediscovering the same
+        # AccessDenied gaps that repo already found the hard way.
+        Sid      = "CloudWatchAlarmWrite"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricAlarm", "cloudwatch:DeleteAlarms", "cloudwatch:TagResource", "cloudwatch:UntagResource"]
+        Resource = "*"
       },
       {
         Sid    = "SchedulerWrite"
