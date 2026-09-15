@@ -48,6 +48,12 @@ module "abuse_alarm" {
       threshold = 5
     }
   }
+
+  # Waits out gha_apply's IAM propagation lag for the SnsAbuseAlarmTopicWrite/
+  # CloudWatchAlarmWrite grants (cicd_oidc.tf) — live-confirmed needed:
+  # sns:CreateTopic AccessDenied'd here on the first real apply, about a
+  # second after the policy update itself reported success.
+  depends_on = [time_sleep.wait_for_abuse_alarm_iam]
 }
 
 output "abuse_alarm_topic_arn" {
